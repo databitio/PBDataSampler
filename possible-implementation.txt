@@ -1,0 +1,820 @@
+Below is a handoff-ready implementation package: an engineering task breakdown plus a module skeleton (folder structure + stub code) that matches the spec you approved. Another agent can pick this up and fill in the internals quickly.
+
+1) Delivery Plan: Epics → Stories → Subtasks
+Epic A — CLI + Config
+
+Goal: a runnable CLI with validated parameters and deterministic seeding.
+
+A1. CLI contract
+
+Implement ppa_frame_sampler CLI flags (defaults per spec)
+
+Validate ranges (e.g., frames_per_sample > 0, total_frames > 0)
+
+A2. Config object
+
+Central Config dataclass
+
+Load/save config to manifest
+
+A3. Logging
+
+Structured logs (levels: INFO/WARN/ERROR)
+
+Include run_id and counters
+
+Done when: ppa_frame_sampler --help matches the spec, runs without doing work (dry run optional).
+
+Epic B — Tooling & Environment Checks
+
+Goal: fail fast if dependencies missing.
+
+B1. Verify external tools
+
+yt-dlp, ffmpeg, ffprobe version checks
+
+B2. Create output dirs
+
+Ensure out/frames, tmp exist
+
+B3. Cleanup policy
+
+Temp clips removed after each attempt
+
+Optional --keep-tmp
+
+Done when: tool absence yields clear message and exit code.
+
+Epic C — Channel Resolution & Catalog
+
+Goal: resolve channel and collect eligible videos.
+
+C1. Channel resolver
+
+Use yt-dlp -J ytsearchN:... and select channel URL/handle
+
+Override via --channel-url
+
+C2. Video catalog
+
+Pull channel /videos flat playlist
+
+Resolve details per video (upload_date, duration, URL)
+
+Filter by max_age_days, min_video_duration_s
+
+Stop after max_videos
+
+Done when: manifest logs candidate count and the app can choose random eligible video.
+
+Epic D — Timestamp Sampling with Intro/Outro Bias
+
+Goal: choose timestamps away from intros/outros.
+
+D1. Hard margin sampler
+
+Uniform inside allowed window
+
+D2. Soft bias sampler
+
+Beta(α, β) distribution mapped to [0, duration]
+
+Enforce feasibility bounds for segment length
+
+D3. Segment length planner
+
+Estimate needed seconds from fps guess + buffer
+
+Optional post-download fps adjustment
+
+Done when: sampling never produces invalid start/end; bias mode switch works.
+
+Epic E — Segment Download & Frame Extraction
+
+Goal: download short clip and extract N consecutive frames.
+
+E1. Download segment
+
+yt-dlp --download-sections "*start-end" to mp4
+
+Retry with longer segment if too few frames
+
+E2. FPS probing
+
+ffprobe avg_frame_rate fallback to 30
+
+E3. Frame extraction
+
+ffmpeg -vsync 0 -frames:v N output pattern
+
+Support jpg/png
+
+Done when: extracting a single burst produces exactly frames_per_sample (unless trimmed to cap).
+
+Epic F — Burst Quality Filter (Menus/Replays/Overlays)
+
+Goal: reject low-value bursts via heuristics.
+
+F1. Sampling frames for analysis
+
+Analyze k frames (e.g., 5 evenly spaced)
+
+Downscale for speed
+
+F2. Metrics
+
+Motion score (mean abs diff)
+
+Static score (% low-diff pairs)
+
+Edge density (Canny)
+
+Overlay coverage (low variance pixel fraction)
+
+Optional scene cut rate (hist distance)
+
+F3. Decision logic
+
+Accept/reject with reason + metrics in manifest
+
+Done when: bursts with static UI are rejected in a small curated test set.
+
+Epic G — Collection Loop + Manifest + Zip
+
+Goal: repeat until exact total_frames and write manifest.
+
+G1. Collection loop
+
+Track collected frames, accepted/rejected bursts
+
+Enforce overshoot cap
+
+G2. Output naming
+
+Prefix: videoid_timestampms
+
+Deterministic ordering
+
+G3. Manifest writer
+
+Write run_manifest.json with full traceability
+
+G4. Zip output
+
+Optional zip of frames only
+
+Done when: default run outputs exactly 500 frames and manifest matches schema.
+
+Epic H — Tests
+
+Goal: basic correctness and guardrails.
+
+H1. Unit tests
+
+Sampler bounds
+
+Slug safety
+
+Manifest schema fields exist
+
+H2. Integration test
+
+“single burst” pipeline behind a flag or recorded clip
+
+H3. Heuristic validation harness
+
+Run filter against a folder of known-good/known-bad bursts
+
+Done when: CI can run unit tests offline; integration tests are optional/manual.
+
+2) Repository Layout (Module Skeleton)
+ppa-frame-sampler/
+  pyproject.toml
+  README.md
+  src/
+    ppa_frame_sampler/
+      __init__.py
+      cli.py
+      config.py
+      run_id.py
+      logging_utils.py
+
+      youtube/
+        __init__.py
+        channel_resolver.py
+        catalog.py
+        models.py
+
+      sampling/
+        __init__.py
+        timestamp_sampler.py
+        segment_planner.py
+
+      media/
+        __init__.py
+        tools.py
+        downloader.py
+        ffprobe.py
+        extractor.py
+
+      filter/
+        __init__.py
+        quality_filter.py
+        metrics.py
+        models.py
+
+      output/
+        __init__.py
+        naming.py
+        manifest.py
+        zipper.py
+        cleanup.py
+
+      pipeline/
+        __init__.py
+        collector.py
+
+  tests/
+    test_slug.py
+    test_sampler_bounds.py
+    test_manifest_minimal.py
+
+3) Code Skeleton (Stubs)
+pyproject.toml
+[project]
+name = "ppa-frame-sampler"
+version = "0.1.0"
+description = "Sample consecutive frames from recent PPA Tour YouTube videos for CVAT labeling."
+requires-python = ">=3.10"
+dependencies = [
+  "yt-dlp>=2024.0.0",
+  "opencv-python>=4.8.0",
+]
+
+[project.scripts]
+ppa-frame-sampler = "ppa_frame_sampler.cli:main"
+
+src/ppa_frame_sampler/config.py
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Literal, Optional
+
+BiasMode = Literal["hard_margin", "soft_bias"]
+ImageFormat = Literal["jpg", "png"]
+
+@dataclass(frozen=True)
+class FilterThresholds:
+    min_motion_score: float = 0.10
+    max_static_score: float = 0.70
+    min_edge_density: float = 0.02
+    max_overlay_coverage: float = 0.45
+    reject_on_scene_cuts: bool = False
+    scene_cut_rate_max: float = 0.50  # only used if reject_on_scene_cuts=True
+
+@dataclass(frozen=True)
+class Config:
+    # YouTube / catalog
+    channel_query: str = "PPA Tour"
+    channel_url: Optional[str] = None
+    max_age_days: int = 365
+    max_videos: int = 200
+    min_video_duration_s: int = 120
+
+    # Sampling
+    frames_per_sample: int = 20
+    total_frames: int = 500
+    seed: Optional[int] = None
+    bias_mode: BiasMode = "soft_bias"
+    intro_margin_s: float = 15.0
+    outro_margin_s: float = 15.0
+    buffer_seconds: float = 1.0
+    max_retries_per_burst: int = 5
+
+    # Output
+    out_dir: str = "output/frames"
+    tmp_dir: str = "output/tmp"
+    image_format: ImageFormat = "jpg"
+    make_zip: bool = False
+    keep_tmp: bool = False
+
+    # Filter
+    thresholds: FilterThresholds = FilterThresholds()
+
+    # Performance knobs
+    analysis_frame_count: int = 5  # frames sampled from burst for metrics
+    analysis_resize_width: int = 320
+
+src/ppa_frame_sampler/cli.py
+from __future__ import annotations
+import argparse
+import sys
+from ppa_frame_sampler.config import Config, FilterThresholds
+from ppa_frame_sampler.pipeline.collector import run_collection
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser("ppa-frame-sampler")
+    p.add_argument("--channel-query", default="PPA Tour")
+    p.add_argument("--channel-url", default=None)
+
+    p.add_argument("--max-age-days", type=int, default=365)
+    p.add_argument("--max-videos", type=int, default=200)
+    p.add_argument("--min-video-duration-s", type=int, default=120)
+
+    p.add_argument("--frames-per-sample", type=int, default=20)
+    p.add_argument("--total-frames", type=int, default=500)
+    p.add_argument("--seed", type=int, default=None)
+
+    p.add_argument("--bias-mode", choices=["hard_margin", "soft_bias"], default="soft_bias")
+    p.add_argument("--intro-margin-s", type=float, default=15.0)
+    p.add_argument("--outro-margin-s", type=float, default=15.0)
+    p.add_argument("--buffer-seconds", type=float, default=1.0)
+    p.add_argument("--max-retries-per-burst", type=int, default=5)
+
+    p.add_argument("--out", dest="out_dir", default="output/frames")
+    p.add_argument("--tmp", dest="tmp_dir", default="output/tmp")
+    p.add_argument("--format", dest="image_format", choices=["jpg", "png"], default="jpg")
+    p.add_argument("--zip", dest="make_zip", action="store_true")
+    p.add_argument("--keep-tmp", dest="keep_tmp", action="store_true")
+
+    # Filter thresholds
+    p.add_argument("--min-motion-score", type=float, default=0.10)
+    p.add_argument("--max-static-score", type=float, default=0.70)
+    p.add_argument("--min-edge-density", type=float, default=0.02)
+    p.add_argument("--max-overlay-coverage", type=float, default=0.45)
+    p.add_argument("--reject-on-scene-cuts", action="store_true")
+    p.add_argument("--scene-cut-rate-max", type=float, default=0.50)
+
+    return p
+
+def main() -> None:
+    args = build_parser().parse_args()
+
+    # Basic validation
+    if args.frames_per_sample <= 0 or args.total_frames <= 0:
+        print("frames-per-sample and total-frames must be > 0", file=sys.stderr)
+        sys.exit(2)
+
+    thresholds = FilterThresholds(
+        min_motion_score=args.min_motion_score,
+        max_static_score=args.max_static_score,
+        min_edge_density=args.min_edge_density,
+        max_overlay_coverage=args.max_overlay_coverage,
+        reject_on_scene_cuts=args.reject_on_scene_cuts,
+        scene_cut_rate_max=args.scene_cut_rate_max,
+    )
+
+    cfg = Config(
+        channel_query=args.channel_query,
+        channel_url=args.channel_url,
+        max_age_days=args.max_age_days,
+        max_videos=args.max_videos,
+        min_video_duration_s=args.min_video_duration_s,
+        frames_per_sample=args.frames_per_sample,
+        total_frames=args.total_frames,
+        seed=args.seed,
+        bias_mode=args.bias_mode,
+        intro_margin_s=args.intro_margin_s,
+        outro_margin_s=args.outro_margin_s,
+        buffer_seconds=args.buffer_seconds,
+        max_retries_per_burst=args.max_retries_per_burst,
+        out_dir=args.out_dir,
+        tmp_dir=args.tmp_dir,
+        image_format=args.image_format,
+        make_zip=args.make_zip,
+        keep_tmp=args.keep_tmp,
+        thresholds=thresholds,
+    )
+
+    run_collection(cfg)
+
+src/ppa_frame_sampler/youtube/models.py
+from __future__ import annotations
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class VideoMeta:
+    video_id: str
+    title: str
+    webpage_url: str
+    duration_s: float
+    upload_date: str  # YYYYMMDD
+
+src/ppa_frame_sampler/youtube/channel_resolver.py
+from __future__ import annotations
+from ppa_frame_sampler.media.tools import run_cmd_json
+
+def resolve_channel_url(channel_query: str) -> str:
+    """
+    Best-effort resolver: search for the channel. No API keys.
+    Must return a channel URL or handle URL.
+    """
+    # TODO: use yt-dlp ytsearch and find channel-like URL (channel_url/uploader_url)
+    # Fallback to https://www.youtube.com/@PPATour
+    raise NotImplementedError
+
+src/ppa_frame_sampler/youtube/catalog.py
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+from ppa_frame_sampler.youtube.models import VideoMeta
+from ppa_frame_sampler.media.tools import run_cmd_json
+
+def list_recent_videos(channel_url: str, max_age_days: int, max_videos: int, min_duration_s: int) -> List[VideoMeta]:
+    """
+    Return up to max_videos eligible videos from channel_url/videos.
+    Eligibility: upload_date within max_age_days and duration >= min_duration_s.
+    """
+    # TODO:
+    # 1) yt-dlp -J --flat-playlist channel/videos
+    # 2) For each entry, yt-dlp -J --no-playlist video_url
+    # 3) filter by date and duration
+    raise NotImplementedError
+
+src/ppa_frame_sampler/sampling/timestamp_sampler.py
+from __future__ import annotations
+import random
+from typing import Tuple, Literal
+
+BiasMode = Literal["hard_margin", "soft_bias"]
+
+def sample_timestamp(
+    duration_s: float,
+    segment_len_s: float,
+    intro_margin_s: float,
+    outro_margin_s: float,
+    bias_mode: BiasMode,
+) -> float:
+    """
+    Returns a start timestamp (seconds) such that [start, start+segment_len_s] fits in video.
+    Applies intro/outro avoidance per bias_mode.
+    """
+    # TODO:
+    # - hard_margin: uniform over [intro_margin_s, duration_s-outro_margin_s-segment_len_s]
+    # - soft_bias: Beta(2.5,2.5) mapped to legal range
+    raise NotImplementedError
+
+src/ppa_frame_sampler/sampling/segment_planner.py
+from __future__ import annotations
+
+def plan_segment_len_s(frames_per_sample: int, fps_guess: float, buffer_seconds: float) -> float:
+    """
+    Compute initial clip length to download.
+    """
+    # Example: max(2.0, frames_per_sample/fps_guess + buffer_seconds)
+    raise NotImplementedError
+
+src/ppa_frame_sampler/media/tools.py
+from __future__ import annotations
+import json
+import shutil
+import subprocess
+from typing import Any, Dict, List
+
+def ensure_tool(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        raise RuntimeError(f"Required tool not found on PATH: {name}")
+    return path
+
+def run_cmd(cmd: List[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+def run_cmd_json(cmd: List[str]) -> Dict[str, Any]:
+    p = run_cmd(cmd)
+    return json.loads(p.stdout)
+
+src/ppa_frame_sampler/media/downloader.py
+from __future__ import annotations
+from pathlib import Path
+from ppa_frame_sampler.media.tools import run_cmd, ensure_tool
+
+def download_segment(video_url: str, start_s: float, end_s: float, out_path: Path) -> None:
+    """
+    Download only the requested segment using yt-dlp.
+    """
+    # TODO: yt-dlp --download-sections "*start-end" and merge to mp4
+    raise NotImplementedError
+
+src/ppa_frame_sampler/media/ffprobe.py
+from __future__ import annotations
+from pathlib import Path
+from ppa_frame_sampler.media.tools import run_cmd_json, ensure_tool
+
+def probe_fps(video_path: Path) -> float:
+    """
+    Return fps from ffprobe avg_frame_rate. Fallback to 30.
+    """
+    # TODO: ffprobe json and parse avg_frame_rate
+    raise NotImplementedError
+
+src/ppa_frame_sampler/media/extractor.py
+from __future__ import annotations
+from pathlib import Path
+from typing import List
+from ppa_frame_sampler.media.tools import run_cmd, ensure_tool
+
+def extract_frames(clip_path: Path, frames: int, out_dir: Path, prefix: str, image_format: str) -> List[Path]:
+    """
+    Extract consecutive decoded frames from clip_path to out_dir with prefix.
+    Returns list of written frame paths.
+    """
+    # TODO: ffmpeg -vsync 0 -frames:v N output pattern
+    raise NotImplementedError
+
+src/ppa_frame_sampler/filter/models.py
+from __future__ import annotations
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class FilterMetrics:
+    motion_score: float
+    static_score: float
+    edge_density: float
+    overlay_coverage: float
+    scene_cut_rate: float | None = None
+
+@dataclass(frozen=True)
+class FilterDecision:
+    accepted: bool
+    reason: str
+    metrics: FilterMetrics
+
+src/ppa_frame_sampler/filter/metrics.py
+from __future__ import annotations
+from pathlib import Path
+from typing import List, Tuple
+import cv2
+import numpy as np
+
+def load_and_resize(paths: List[Path], width: int) -> List[np.ndarray]:
+    imgs = []
+    for p in paths:
+        img = cv2.imread(str(p), cv2.IMREAD_COLOR)
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        if w > width:
+            scale = width / float(w)
+            img = cv2.resize(img, (width, int(h * scale)), interpolation=cv2.INTER_AREA)
+        imgs.append(img)
+    return imgs
+
+def compute_motion_score(imgs: List[np.ndarray]) -> float:
+    # TODO: mean abs diff of grayscale consecutive frames / 255
+    raise NotImplementedError
+
+def compute_static_score(imgs: List[np.ndarray], diff_thresh: float = 2.0) -> float:
+    # TODO: fraction of pairs with mean abs diff < diff_thresh
+    raise NotImplementedError
+
+def compute_edge_density(img: np.ndarray) -> float:
+    # TODO: canny edges ratio
+    raise NotImplementedError
+
+def compute_overlay_coverage(imgs: List[np.ndarray], var_thresh: float = 2.0) -> float:
+    # TODO: per-pixel variance across frames, fraction below threshold
+    raise NotImplementedError
+
+def compute_scene_cut_rate(imgs: List[np.ndarray], cut_thresh: float = 0.35) -> float:
+    # TODO: histogram distance between consecutive frames
+    raise NotImplementedError
+
+src/ppa_frame_sampler/filter/quality_filter.py
+from __future__ import annotations
+from pathlib import Path
+from typing import List
+from ppa_frame_sampler.config import FilterThresholds
+from ppa_frame_sampler.filter.models import FilterDecision, FilterMetrics
+from ppa_frame_sampler.filter import metrics as M
+
+def evaluate_burst(frame_paths: List[Path], thresholds: FilterThresholds, analysis_resize_width: int, analysis_frame_count: int) -> FilterDecision:
+    """
+    Analyze a subset of frames and return accept/reject with metrics and reason.
+    """
+    # TODO:
+    # - select evenly spaced subset of frames for analysis
+    # - compute metrics
+    # - apply threshold logic (conservative defaults)
+    raise NotImplementedError
+
+src/ppa_frame_sampler/output/naming.py
+from __future__ import annotations
+import re
+
+def safe_slug(s: str, max_len: int = 80) -> str:
+    s = re.sub(r"[^\w\-]+", "_", s.strip())
+    s = re.sub(r"_+", "_", s)
+    return (s[:max_len].strip("_") or "item")
+
+src/ppa_frame_sampler/output/manifest.py
+from __future__ import annotations
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+import json
+
+def write_manifest(path: Path, manifest: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+src/ppa_frame_sampler/output/zipper.py
+from __future__ import annotations
+from pathlib import Path
+import zipfile
+
+def zip_frames(frames_dir: Path, zip_path: Path) -> None:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(frames_dir.glob("*")):
+            if p.is_file():
+                z.write(p, arcname=p.name)
+
+src/ppa_frame_sampler/pipeline/collector.py
+from __future__ import annotations
+import random
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Dict, Any, List
+
+from ppa_frame_sampler.config import Config
+from ppa_frame_sampler.youtube.channel_resolver import resolve_channel_url
+from ppa_frame_sampler.youtube.catalog import list_recent_videos
+from ppa_frame_sampler.sampling.segment_planner import plan_segment_len_s
+from ppa_frame_sampler.sampling.timestamp_sampler import sample_timestamp
+from ppa_frame_sampler.media.downloader import download_segment
+from ppa_frame_sampler.media.ffprobe import probe_fps
+from ppa_frame_sampler.media.extractor import extract_frames
+from ppa_frame_sampler.filter.quality_filter import evaluate_burst
+from ppa_frame_sampler.output.naming import safe_slug
+from ppa_frame_sampler.output.manifest import write_manifest
+from ppa_frame_sampler.output.zipper import zip_frames
+
+def run_collection(cfg: Config) -> None:
+    if cfg.seed is not None:
+        random.seed(cfg.seed)
+
+    out_dir = Path(cfg.out_dir)
+    tmp_dir = Path(cfg.tmp_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve channel + candidates
+    channel_url = cfg.channel_url or resolve_channel_url(cfg.channel_query)
+    candidates = list_recent_videos(channel_url, cfg.max_age_days, cfg.max_videos, cfg.min_video_duration_s)
+    if not candidates:
+        raise RuntimeError("No eligible videos found with current constraints.")
+
+    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    manifest: Dict[str, Any] = {
+        "run_id": (f"{run_id}_seed{cfg.seed}" if cfg.seed is not None else run_id),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "params": {
+            "channel_url": channel_url,
+            "max_age_days": cfg.max_age_days,
+            "max_videos": cfg.max_videos,
+            "min_video_duration_s": cfg.min_video_duration_s,
+            "frames_per_sample": cfg.frames_per_sample,
+            "total_frames": cfg.total_frames,
+            "seed": cfg.seed,
+            "bias_mode": cfg.bias_mode,
+            "intro_margin_s": cfg.intro_margin_s,
+            "outro_margin_s": cfg.outro_margin_s,
+            "buffer_seconds": cfg.buffer_seconds,
+            "image_format": cfg.image_format,
+        },
+        "candidates": {"count": len(candidates)},
+        "samples": [],
+        "totals": {"accepted_bursts": 0, "rejected_bursts": 0, "frames_written": 0},
+    }
+
+    collected = 0
+    burst_idx = 0
+
+    while collected < cfg.total_frames:
+        video = random.choice(candidates)
+        burst_idx += 1
+
+        # Plan initial segment
+        segment_len_s = plan_segment_len_s(cfg.frames_per_sample, fps_guess=30.0, buffer_seconds=cfg.buffer_seconds)
+        start_s = sample_timestamp(
+            duration_s=video.duration_s,
+            segment_len_s=segment_len_s,
+            intro_margin_s=cfg.intro_margin_s,
+            outro_margin_s=cfg.outro_margin_s,
+            bias_mode=cfg.bias_mode,
+        )
+        end_s = min(video.duration_s, start_s + segment_len_s)
+
+        clip_path = tmp_dir / f"{safe_slug(video.video_id)}_b{burst_idx:05d}.mp4"
+
+        # Attempt/retry loop
+        accepted = False
+        attempts = 0
+        last_reason = "not_run"
+        while attempts < cfg.max_retries_per_burst and not accepted:
+            attempts += 1
+
+            # Download segment
+            download_segment(video.webpage_url, start_s, end_s, clip_path)
+
+            # Probe FPS and ensure sufficient segment length (optional: re-download longer)
+            fps = probe_fps(clip_path)
+            # TODO: if end-start too short for frames_per_sample/fps, re-download once longer
+
+            # Extract frames to temp naming prefix
+            ts_ms = int(start_s * 1000)
+            prefix = f"{safe_slug(video.video_id)}_{ts_ms:010d}ms"
+            frame_paths = extract_frames(clip_path, cfg.frames_per_sample, out_dir, prefix, cfg.image_format)
+
+            # Enforce overshoot cap (delete extras)
+            if collected + len(frame_paths) > cfg.total_frames:
+                overflow = (collected + len(frame_paths)) - cfg.total_frames
+                for p in frame_paths[-overflow:]:
+                    p.unlink(missing_ok=True)
+                frame_paths = frame_paths[:-overflow]
+
+            # Filter decision
+            decision = evaluate_burst(
+                frame_paths,
+                thresholds=cfg.thresholds,
+                analysis_resize_width=cfg.analysis_resize_width,
+                analysis_frame_count=cfg.analysis_frame_count,
+            )
+
+            sample_rec: Dict[str, Any] = {
+                "video_id": video.video_id,
+                "video_url": video.webpage_url,
+                "title": video.title,
+                "upload_date": video.upload_date,
+                "duration_s": video.duration_s,
+                "timestamp_s": start_s,
+                "segment": {"start_s": start_s, "end_s": end_s},
+                "extracted_frames": len(frame_paths),
+                "accepted": decision.accepted,
+                "filter_reason": decision.reason,
+                "filter_metrics": decision.metrics.__dict__,
+                "output_prefix": prefix,
+                "attempt": attempts,
+            }
+            manifest["samples"].append(sample_rec)
+
+            if decision.accepted and len(frame_paths) > 0:
+                collected += len(frame_paths)
+                manifest["totals"]["accepted_bursts"] += 1
+                accepted = True
+            else:
+                # reject: delete those frames
+                for p in frame_paths:
+                    p.unlink(missing_ok=True)
+                manifest["totals"]["rejected_bursts"] += 1
+                last_reason = decision.reason
+
+            # cleanup temp
+            if not cfg.keep_tmp:
+                clip_path.unlink(missing_ok=True)
+
+        manifest["totals"]["frames_written"] = collected
+
+    # Write manifest + zip (optional)
+    write_manifest(Path("output") / "run_manifest.json", manifest)
+    if cfg.make_zip:
+        zip_frames(out_dir, Path("output") / "cvat_upload.zip")
+
+4) Minimal Tests (Stubs)
+tests/test_sampler_bounds.py
+import pytest
+from ppa_frame_sampler.sampling.timestamp_sampler import sample_timestamp
+
+def test_sampler_does_not_exceed_bounds():
+    duration = 600.0
+    seg = 3.0
+    s = sample_timestamp(duration, seg, 15.0, 15.0, "hard_margin")
+    assert 15.0 <= s <= (duration - 15.0 - seg)
+
+tests/test_slug.py
+from ppa_frame_sampler.output.naming import safe_slug
+
+def test_slug_is_filesystem_safe():
+    s = safe_slug("Hello / World? * (PPA)")
+    assert "/" not in s and "?" not in s and "*" not in s
+
+tests/test_manifest_minimal.py
+def test_manifest_fields_present():
+    # This is a placeholder; validate manifest keys if you write a schema checker.
+    assert True
+
+5) Agent Handoff Notes (What to Implement First)
+
+If another AI agent is taking this:
+
+Implement media/tools + downloader + extractor + ffprobe (fast to get end-to-end sampling working).
+
+Implement channel_resolver + catalog (eligibility pool).
+
+Implement timestamp_sampler + segment_planner (bias away from intros/outros).
+
+Implement quality_filter (metrics + threshold logic).
+
+Tighten manifest + overshoot behavior + zip.
+
+That order gets a working baseline quickly, then improves dataset quality.

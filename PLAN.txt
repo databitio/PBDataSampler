@@ -1,0 +1,583 @@
+Software Specification: PPA YouTube Frame Sampler for CVAT
+1) Purpose
+
+Build a local application that:
+
+Visits YouTube and identifies the PPA Tour YouTube channel.
+
+Selects videos not older than 1 year (configurable).
+
+Randomly samples short consecutive-frame bursts from random timestamps biased away from intros/outros.
+
+Applies lightweight filtering to avoid bursts dominated by menus/overlays/replays/low-value frames.
+
+Continues sampling until it collects a target total number of frames (default 500), saving them as plain image files ready for CVAT import.
+
+The app must run locally, be reproducible (seedable), require no YouTube API key, and produce a simple folder of images or a zip.
+
+2) Definitions & Terms
+
+Burst / Sample: A set of frames_per_sample consecutive decoded frames extracted from a short clip.
+
+Total Frames: Total number of frames written across all bursts, capped at total_frames.
+
+Eligible Video: A video meeting age and minimum-duration constraints.
+
+Intro/Outro Bias: Sampling strategy that reduces probability of picking timestamps near the start/end.
+
+Low-value Burst: A burst likely consisting mostly of menus, replays, scoreboard-only, static overlays, or other non-live-play frames.
+
+3) Scope
+In Scope
+
+Channel discovery (search-based, no API key)
+
+Recent video listing and eligibility filtering
+
+Random timestamp selection with intro/outro bias
+
+Segment download of only a small window around the timestamp
+
+Consecutive frame extraction to JPEG (or PNG option)
+
+Low-value burst detection and rejection
+
+Disk output suitable for CVAT (folder and optional zip)
+
+CLI interface and deterministic runs via seed
+
+Logging and run manifest output for traceability
+
+Out of Scope (v1)
+
+Full video downloading
+
+Real-time streaming
+
+Automatic labeling
+
+Training models
+
+Cloud deployment / Airflow orchestration
+
+Perfect replay detection via ML (heuristics only in v1, but extensible)
+
+4) User Stories
+
+As a user, I want to collect 500 frames from PPA matches uploaded within the last year so I can label them in CVAT.
+
+As a user, I want to control sample size (frames per burst) and total frames.
+
+As a user, I want the sampler to avoid intros/outros and reduce menu/replay-heavy frames.
+
+As a user, I want outputs organized predictably and reproducibly so datasets can be compared across runs.
+
+5) Requirements
+5.1 Functional Requirements
+
+FR-1 Channel Resolution
+
+The app shall locate the PPA Tour YouTube channel using a query (default: "PPA Tour") and a best-effort search.
+
+The app shall allow a direct override via --channel-url.
+
+FR-2 Video Eligibility
+
+The app shall build a candidate pool of videos from the channel such that:
+
+Upload date is within max_age_days (default: 365).
+
+Duration is at least min_video_duration_s (default: 15s; recommended 120s).
+
+The app shall stop candidate collection after max_videos (default: 200) qualifying videos.
+
+FR-3 Timestamp Sampling with Intro/Outro Bias
+
+For each chosen video, the app shall select a timestamp according to a distribution that reduces selection near:
+
+The first intro_margin_s seconds (default: 15s) and
+
+The last outro_margin_s seconds (default: 15s).
+
+The app shall support at least two bias modes:
+
+hard_margin: never sample inside margins (simple exclusion).
+
+soft_bias: still possible but less likely (weighted distribution).
+
+FR-4 Segment Download
+
+The app shall download only a short segment surrounding the sampled timestamp:
+
+Segment length derived from frames_per_sample / estimated_fps + buffer_s.
+
+Must be sufficient to decode at least frames_per_sample consecutive frames.
+
+The app shall retry once with a longer segment if extraction yields insufficient frames.
+
+FR-5 Consecutive Frame Extraction
+
+The app shall extract exactly frames_per_sample consecutive decoded frames from the segment (or fewer only if nearing total_frames cap).
+
+Output shall be individual image files:
+
+Default format: .jpg (quality target: high, e.g., q=2 equivalent)
+
+Optional: .png via flag
+
+FR-6 Low-Value Burst Filtering (Menus/Replays/Overlays)
+
+The app shall evaluate each burst and reject it if it appears dominated by low-value content such as:
+
+Static menu screens
+
+Replay title cards / interstitials
+
+Extended static overlays with minimal motion
+
+Detection shall be heuristic-based in v1 (details in §8).
+
+If a burst is rejected, the app shall discard its frames and sample again from potentially a different timestamp/video.
+
+FR-7 Collection Loop
+
+The app shall repeat sampling until total_frames images are saved.
+
+The app shall prevent overshoot by deleting or not writing frames beyond total_frames.
+
+FR-8 Output Layout
+
+The app shall store frames in an output directory (default: output/frames/).
+
+The app shall store temporary video segments in output/tmp/ and clean them up.
+
+The app shall produce a run manifest file (JSON) containing:
+
+Parameters used
+
+Video IDs and URLs sampled
+
+Timestamps and segment lengths
+
+Acceptance/rejection reasons
+
+Counts of frames written
+
+FR-9 CVAT Compatibility
+
+Output images must be directly importable into CVAT as an image dataset.
+
+Optional output: --zip to create a zip archive containing only the image files.
+
+5.2 Non-Functional Requirements
+
+NFR-1 Performance
+
+Should minimize bandwidth by downloading only short segments.
+
+Must complete within a reasonable time on a typical desktop (best effort; depends on network).
+
+NFR-2 Reproducibility
+
+With a fixed --seed, video selection and timestamps should be deterministic given the same candidate pool.
+
+NFR-3 Robustness
+
+Should handle failed downloads/extractions gracefully and continue.
+
+Should avoid leaving large temporary files behind.
+
+NFR-4 Portability
+
+Runs on Windows/macOS/Linux.
+
+Dependencies: Python 3.10+ (recommended), yt-dlp, ffmpeg, ffprobe.
+
+NFR-5 Maintainability
+
+Modular architecture with separable components:
+
+Discovery, Eligibility, Sampling, Download, Extract, Filter, Output, Manifest
+
+6) CLI Interface (Proposed)
+
+Required: none (defaults provided)
+
+Flags:
+
+--channel-query "PPA Tour"
+
+--channel-url <url>
+
+--max-age-days 365
+
+--max-videos 200
+
+--frames-per-sample 20
+
+--total-frames 500
+
+--seed 123
+
+--out output/frames
+
+--tmp output/tmp
+
+--format jpg|png
+
+--zip (boolean)
+
+--min-video-duration-s 120
+
+--bias-mode hard_margin|soft_bias
+
+--intro-margin-s 15
+
+--outro-margin-s 15
+
+--buffer-seconds 1.0
+
+--max-retries-per-burst 5
+
+Filtering thresholds (see §8):
+
+--max-static-score 0.70
+
+--min-motion-score 0.10
+
+--max-overlay-coverage 0.45
+
+--min_edge_density 0.02
+
+--reject-on-scene-cuts true|false
+
+7) System Architecture
+7.1 High-Level Flow
+
+Resolve Channel
+
+Fetch Candidate Videos
+
+Loop until total_frames collected:
+
+Pick random video
+
+Pick biased timestamp
+
+Download short segment
+
+Extract burst of consecutive frames
+
+Run burst-quality filter
+
+If accepted: persist frames
+
+If rejected: delete burst frames and retry
+
+Write manifest and optional zip
+
+7.2 Components
+
+A. ChannelResolver
+
+Inputs: channel_query, channel_url
+
+Output: canonical channel URL
+
+Behavior: search-based fallback to known handle; allow override.
+
+B. VideoCatalog
+
+Inputs: channel URL, max_age_days, max_videos, min_video_duration_s
+
+Output: list of eligible video metadata (id, title, url, duration, upload_date)
+
+C. TimestampSampler
+
+Inputs: duration, bias params
+
+Output: start timestamp, end timestamp (segment window)
+
+D. SegmentDownloader
+
+Inputs: video URL, start/end
+
+Output: local clip file path
+
+Uses: yt-dlp --download-sections
+
+E. FrameExtractor
+
+Inputs: clip file, frames_per_sample, format
+
+Output: frame image files
+
+Uses: ffmpeg -frames:v N -vsync 0
+
+F. BurstQualityFilter
+
+Inputs: list of frames (or downsampled)
+
+Output: accept/reject + reason + metrics
+
+G. OutputManager
+
+Handles naming, overshoot prevention, cleanup
+
+Writes manifest and zip
+
+8) Burst Quality Filtering (Menus / Replays / Low-Value)
+
+Goal: reject bursts that are mostly non-live-play content without needing a trained model.
+
+Design principle: compute cheap per-burst signals on a subset of frames (e.g., 5 evenly spaced frames out of 20) using OpenCV.
+
+8.1 Metrics (Heuristic Signals)
+
+M1: Motion Score (Inter-frame Difference)
+
+Convert frames to grayscale (optionally resize to 320px width).
+
+Compute mean absolute difference between consecutive frames.
+
+Normalize to [0,1] by dividing by 255.
+
+Low motion indicates static screens, menus, or still replays.
+
+Reject condition (default):
+
+motion_score < min_motion_score (e.g., 0.10)
+
+M2: Static Score
+
+Percentage of frame pairs with difference below a very small threshold.
+
+High static score suggests menus/title cards.
+
+Reject condition (default):
+
+static_score > max_static_score (e.g., 0.70)
+
+M3: Edge Density
+
+Run Canny edges on a downscaled frame.
+
+Compute ratio of edge pixels to total pixels.
+
+Extremely low edge density indicates blank/flat UI, fades, solid-color cards.
+
+Reject condition (default):
+
+edge_density < min_edge_density (e.g., 0.02)
+
+M4: Overlay Coverage Estimate
+
+Approximate if large portions of the frame are stable UI overlays:
+
+Compute per-pixel variance across sampled frames (downscaled).
+
+Regions with near-zero variance represent static elements.
+
+Overlay coverage = fraction of pixels with variance < threshold.
+
+High overlay coverage suggests scoreboard-only frames, replay graphics, or menus.
+
+Reject condition (default):
+
+overlay_coverage > max_overlay_coverage (e.g., 0.45)
+
+M5: Scene Cut Rate (Optional)
+
+Detect abrupt changes in histogram distance between consecutive frames.
+
+Very high cut rate may indicate highlight reels / transitions, not continuous play.
+
+Reject condition (optional):
+
+scene_cut_rate > scene_cut_rate_max
+
+8.2 Acceptance Logic
+
+A burst is accepted if:
+
+Motion score is above threshold AND
+
+Static score is below threshold AND
+
+Edge density is above threshold AND
+
+Overlay coverage is below threshold
+(Exact boolean logic configurable; defaults should be conservative.)
+
+8.3 Extensibility
+
+Future enhancement: plug-in detector interface to swap heuristics for an ML classifier (e.g., replay/menu detector).
+
+9) Sampling Bias Away from Intros/Outros
+9.1 Hard Margin Mode
+
+Legal sampling range:
+
+[intro_margin_s, duration - outro_margin_s - segment_len]
+
+Uniform within legal range.
+
+9.2 Soft Bias Mode (Recommended)
+
+Use a Beta distribution over normalized time t ∈ [0,1] such that:
+
+Less probability near 0 and 1
+
+Higher probability near the middle
+
+Example: Beta(α=2.5, β=2.5) then map to [0, duration]
+
+Still enforce feasible bounds for segment length.
+
+10) Data Model / Manifest Schema
+
+run_manifest.json
+
+{
+  "run_id": "2026-02-15T12-34-56Z_seed123",
+  "created_utc": "2026-02-15T12:34:56Z",
+  "params": {
+    "channel_url": "...",
+    "max_age_days": 365,
+    "frames_per_sample": 20,
+    "total_frames": 500,
+    "bias_mode": "soft_bias",
+    "intro_margin_s": 15,
+    "outro_margin_s": 15,
+    "format": "jpg",
+    "seed": 123
+  },
+  "candidates": {
+    "count": 87
+  },
+  "samples": [
+    {
+      "video_id": "abc123",
+      "video_url": "...",
+      "title": "...",
+      "upload_date": "20260201",
+      "duration_s": 1834.2,
+      "timestamp_s": 912.33,
+      "segment": {"start_s": 912.33, "end_s": 914.90},
+      "extracted_frames": 20,
+      "accepted": true,
+      "filter_metrics": {
+        "motion_score": 0.18,
+        "static_score": 0.22,
+        "edge_density": 0.04,
+        "overlay_coverage": 0.31
+      },
+      "output_prefix": "abc123_0000912330ms"
+    }
+  ],
+  "totals": {
+    "accepted_bursts": 25,
+    "rejected_bursts": 8,
+    "frames_written": 500
+  }
+}
+
+11) Output Naming & Directory Structure
+
+Default:
+
+output/frames/
+
+videoid_<timestamp>_000001.jpg
+
+videoid_<timestamp>_000002.jpg
+
+output/tmp/ (cleaned after each burst)
+
+output/run_manifest.json
+
+Optional: output/cvat_upload.zip
+
+Naming requirements:
+
+Deterministic, filesystem-safe
+
+Unique per burst
+
+Maintain stable ordering for CVAT import
+
+12) Error Handling & Retries
+
+If channel resolution fails: exit with error and suggestion to use --channel-url.
+
+If no eligible videos: exit with error and report constraints used.
+
+For each burst:
+
+Up to max-retries-per-burst attempts before choosing a new video.
+
+If download fails: retry with a different timestamp/video.
+
+If extraction yields fewer than requested frames: redownload a longer segment once, else reject attempt.
+
+If filter rejects burst: delete frames and resample.
+
+13) Acceptance Criteria
+
+Running with defaults produces exactly 500 image files in output/frames/.
+
+All images are readable and importable into CVAT without additional conversion.
+
+No downloaded full videos; only short segments are downloaded.
+
+Sampled timestamps avoid intros/outros per chosen bias mode.
+
+Burst filter rejects obviously static/menu-heavy bursts in test scenarios.
+
+A manifest is created documenting every accepted and rejected burst with reasons and metrics.
+
+Temporary clips do not persist after completion (unless --keep-tmp is added).
+
+14) Testing Plan (Minimum)
+
+Unit Tests
+
+Slug/naming sanitization
+
+Timestamp sampler bounds & bias distribution sanity
+
+Manifest schema validation
+
+Integration Tests
+
+Candidate listing returns only videos within age threshold
+
+Single burst pipeline: download → extract → filter
+
+End-to-end: total_frames reached exactly with overshoot prevention
+
+Heuristic Validation
+
+Feed known static/menu frames and ensure rejection
+
+Feed known live-play bursts and ensure acceptance above a baseline
+
+15) Implementation Notes (Suggested Tech)
+
+Language: Python 3.10+
+
+External tools: yt-dlp, ffmpeg, ffprobe
+
+Image metrics: OpenCV (opencv-python) recommended
+
+Packaging: pyproject.toml with console entrypoint (optional for v1)
+
+16) Open Points / Future Enhancements
+
+Add dataset stratification (ensure diversity across videos, tournaments, camera angles)
+
+Add option to keep metadata mapping from frame → source video/time for traceability in labeling
+
+Replace heuristics with a lightweight classifier for replay/menu detection
+
+Add “avoid duplicates” by hashing frames and rejecting near-identical images
