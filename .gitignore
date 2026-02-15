@@ -24,7 +24,7 @@ env/
 Thumbs.db
 
 # Project output
-output/
+/output/
 *.zip
 
 # Testing
