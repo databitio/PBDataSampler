@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from ppa_frame_sampler.media.tools import ensure_tool, run_cmd_json
+from ppa_frame_sampler.youtube.cache import get_cached_channel_url, set_cached_channel_url
 
 log = logging.getLogger("ppa_frame_sampler")
 
@@ -15,7 +16,13 @@ def resolve_channel_url(channel_query: str) -> str:
     Uses ``yt-dlp ytsearch`` to find a video matching the query, then extracts
     the uploader/channel URL from the result metadata.  Falls back to the known
     PPA Tour handle if the search fails.
+
+    Results are cached for 24 hours to avoid repeated lookups.
     """
+    cached = get_cached_channel_url(channel_query)
+    if cached:
+        return cached
+
     ytdlp = ensure_tool("yt-dlp")
 
     try:
@@ -34,10 +41,12 @@ def resolve_channel_url(channel_query: str) -> str:
             channel_url = entry.get("channel_url") or entry.get("uploader_url")
             if channel_url:
                 log.info("Resolved channel URL: %s", channel_url)
+                set_cached_channel_url(channel_query, channel_url)
                 return channel_url
 
     except Exception as exc:
         log.warning("Channel search failed (%s), using fallback URL", exc)
 
     log.info("Using fallback channel URL: %s", _FALLBACK_CHANNEL_URL)
+    set_cached_channel_url(channel_query, _FALLBACK_CHANNEL_URL)
     return _FALLBACK_CHANNEL_URL

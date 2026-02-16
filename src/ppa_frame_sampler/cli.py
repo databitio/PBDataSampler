@@ -44,10 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep-tmp", dest="keep_tmp", action="store_true")
 
     # Filter thresholds
-    p.add_argument("--min-motion-score", type=float, default=0.10)
-    p.add_argument("--max-static-score", type=float, default=0.70)
-    p.add_argument("--min-edge-density", type=float, default=0.02)
-    p.add_argument("--max-overlay-coverage", type=float, default=0.45)
+    p.add_argument("--min-motion-score", type=float, default=0.015)
+    p.add_argument("--max-static-score", type=float, default=0.92)
+    p.add_argument("--min-edge-density", type=float, default=0.01)
+    p.add_argument("--max-overlay-coverage", type=float, default=0.70)
     p.add_argument("--reject-on-scene-cuts", action="store_true")
     p.add_argument("--scene-cut-rate-max", type=float, default=0.50)
 
@@ -103,3 +103,7 @@ def main() -> None:
     )
 
     run_collection(cfg)
+
+
+if __name__ == "__main__":
+    main()

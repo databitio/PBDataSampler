@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 from ppa_frame_sampler.media.tools import ensure_tool, run_cmd_json
+from ppa_frame_sampler.youtube.cache import get_cached_videos, set_cached_videos
 from ppa_frame_sampler.youtube.models import VideoMeta
 
 log = logging.getLogger("ppa_frame_sampler")
@@ -20,7 +21,14 @@ def list_recent_videos(
 
     Eligibility: ``upload_date`` within *max_age_days* and
     ``duration >= min_duration_s``.
+
+    Results are cached for 24 hours to avoid repeated yt-dlp lookups.
     """
+    cached = get_cached_videos(channel_url, max_age_days, min_duration_s)
+    if cached is not None:
+        # Apply max_videos limit to cached results
+        return cached[:max_videos]
+
     ytdlp = ensure_tool("yt-dlp")
     videos_url = channel_url.rstrip("/") + "/videos"
 
@@ -112,4 +120,5 @@ def list_recent_videos(
         )
 
     log.info("Found %d eligible videos (from %d total entries)", len(eligible), len(entries))
+    set_cached_videos(channel_url, max_age_days, min_duration_s, eligible)
     return eligible

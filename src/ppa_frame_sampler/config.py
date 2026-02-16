@@ -9,10 +9,10 @@ ImageFormat = Literal["jpg", "png"]
 
 @dataclass(frozen=True)
 class FilterThresholds:
-    min_motion_score: float = 0.10
-    max_static_score: float = 0.70
-    min_edge_density: float = 0.02
-    max_overlay_coverage: float = 0.45
+    min_motion_score: float = 0.015
+    max_static_score: float = 0.92
+    min_edge_density: float = 0.01
+    max_overlay_coverage: float = 0.70
     reject_on_scene_cuts: bool = False
     scene_cut_rate_max: float = 0.50
 
