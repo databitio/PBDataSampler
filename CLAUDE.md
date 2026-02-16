@@ -1,18 +1,95 @@
-# AI Context Documentation
+# PPA Frame Sampler — Developer Context
 
-This project uses AI-generated context documentation. Each entry below links to detailed documentation organized by type.
+## Project Overview
 
-## Features
+PPA Frame Sampler (`ppa-frame-sampler`) is a CLI tool that samples short video clips from recent PPA Tour YouTube videos for CVAT labeling. It requires no YouTube API key — it uses `yt-dlp` for all YouTube interactions.
 
-- **Match Type Filtering (Singles/Doubles)** (2026-02-15) - [Details](.claude/context-docs/features/match-type-filtering.md)
-  Filter PPA Tour videos by match type (singles, doubles, or both) using a title-based heuristic that detects `/` in player names to distinguish doubles from singles.
-
-## Bugs
+The original specification is in [PLAN.txt](PLAN.txt) (§1–§16). The current implementation covers the core pipeline (channel resolution, video cataloging, timestamp sampling, segment download) with clips-only output. Frame extraction and burst quality filtering exist in the codebase but are not wired into the main pipeline (see Refactors below).
 
 ## Architecture
 
+```
+src/ppa_frame_sampler/
+├── cli.py                  # Argparse CLI, entry point
+├── config.py               # Config & FilterThresholds dataclasses
+├── run_id.py               # Timestamped run-ID generation
+├── logging_utils.py        # Logging setup
+├── youtube/
+│   ├── channel_resolver.py # Search-based channel URL resolution (yt-dlp ytsearch)
+│   ├── catalog.py          # list_recent_videos() — flat-playlist fetch + eligibility
+│   ├── models.py           # VideoMeta dataclass, classify_match_type()
+│   └── cache.py            # 24-hour JSON cache for channel URLs & video catalogs
+├── sampling/
+│   ├── timestamp_sampler.py # hard_margin / soft_bias (Beta 2.5,2.5) timestamp selection
+│   └── segment_planner.py   # Compute segment length from frames_per_sample + buffer
+├── media/
+│   ├── downloader.py       # yt-dlp --download-sections segment download
+│   ├── extractor.py        # ffmpeg frame extraction (not used in current pipeline)
+│   ├── ffprobe.py          # ffprobe duration/fps queries
+│   └── tools.py            # Tool path resolution, subprocess helpers
+├── filter/
+│   ├── quality_filter.py   # Burst quality evaluator (not used in current pipeline)
+│   ├── metrics.py          # Motion, static, edge, overlay, scene-cut metrics (OpenCV)
+│   └── models.py           # FilterDecision, FilterMetrics dataclasses
+├── output/
+│   ├── naming.py           # safe_slug() filesystem-safe naming
+│   ├── manifest.py         # JSON manifest writer
+│   ├── zipper.py           # Optional zip archive creation
+│   └── cleanup.py          # Temp directory cleanup
+└── pipeline/
+    └── collector.py        # Main collection loop (run_collection)
+```
+
+### Pipeline Flow (Current)
+
+1. Resolve channel URL (search or `--channel-url` override)
+2. Fetch candidate videos via `yt-dlp --flat-playlist` (cached 24h)
+3. Filter by age, duration, and optionally match type
+4. Loop until `total_frames / frames_per_sample` clips collected:
+   - Pick random video → sample biased timestamp → download short MP4 segment
+5. Write `run_manifest.json` + optional zip
+
+### Key Design Decisions
+
+- **Clips, not frames**: The pipeline currently downloads short MP4 clips rather than extracting individual JPEG/PNG frames. Frame extraction and quality filtering modules exist but were decoupled from the pipeline to simplify initial usage.
+- **Per-run directories**: Each run creates `output/frames/<run_id>/` for isolation.
+- **24-hour cache**: Channel URL and video catalog lookups are cached in `output/.cache/youtube_cache.json` to avoid repeated yt-dlp calls.
+- **No API key**: All YouTube interaction is via yt-dlp (search, flat-playlist, download-sections).
+
+## Dependencies
+
+- **Runtime**: Python 3.10+, `yt-dlp`, `ffmpeg`, `ffprobe`, `opencv-python`
+- **Dev**: `pytest`
+- Defined in `pyproject.toml`; entry point: `ppa-frame-sampler = ppa_frame_sampler.cli:main`
+
+## Testing
+
+```bash
+pytest tests/
+```
+
+Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment planner, manifest schema, config validation, heuristic validation (known static/live-play frames), integration tests for catalog, burst pipeline, and end-to-end flow.
+
+## Features
+
+- **Match Type Filtering (Singles/Doubles)** (2026-02-15) — [Details](.claude/context-docs/features/match-type-filtering.md)
+  Filter videos by match type (`--match-type singles|doubles|both`) using a title-based heuristic that detects `/` in player names to distinguish doubles from singles. "Unknown" titles are kept to avoid silent data loss.
+
 ## Refactors
 
-## Performance
+- **Clips-only pipeline** (2026-02-15) — Frame extraction (`media/extractor.py`) and burst quality filtering (`filter/quality_filter.py`) exist in the codebase but are not wired into `collector.py`. The pipeline currently saves MP4 clips directly. Re-integrating these modules is a future task per PLAN.txt §5–§8.
 
-## Security
+## CLI Quick Reference
+
+```
+ppa-frame-sampler [OPTIONS]
+
+Channel:     --channel-query, --channel-url
+Eligibility: --max-age-days, --max-videos, --min-video-duration-s, --match-type
+Sampling:    --frames-per-sample, --total-frames, --seed
+Bias:        --bias-mode (hard_margin|soft_bias), --intro-margin-s, --outro-margin-s
+Output:      --out, --tmp, --format (jpg|png), --zip, --keep-tmp
+Filtering:   --min-motion-score, --max-static-score, --min-edge-density,
+             --max-overlay-coverage, --reject-on-scene-cuts, --scene-cut-rate-max
+Retries:     --buffer-seconds, --max-retries-per-burst
+```

@@ -53,7 +53,7 @@ def run_collection(cfg: Config) -> None:
         total_before = len(candidates)
         candidates = [
             v for v in candidates
-            if classify_match_type(v.title) in (cfg.match_type, "unknown")
+            if classify_match_type(v.title) == cfg.match_type
         ]
         log.info(
             "Filtered to %d %s matches from %d candidates",
