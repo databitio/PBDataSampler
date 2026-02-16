@@ -21,7 +21,7 @@ src/ppa_frame_sampler/
 │   ├── channel_resolver.py # Search-based channel URL resolution (yt-dlp ytsearch)
 │   ├── catalog.py          # list_recent_videos() — flat-playlist fetch + eligibility
 │   ├── models.py           # VideoMeta dataclass, classify_match_type()
-│   └── cache.py            # 24-hour JSON cache for channel URLs & video catalogs
+│   └── cache.py            # Persistent JSON cache for channel URLs & video catalogs
 ├── sampling/
 │   ├── timestamp_sampler.py # hard_margin / soft_bias (Beta 2.5,2.5) timestamp selection
 │   └── segment_planner.py   # Compute segment length from frames_per_sample + buffer
@@ -46,7 +46,7 @@ src/ppa_frame_sampler/
 ### Pipeline Flow (Current)
 
 1. Resolve channel URL (search or `--channel-url` override)
-2. Fetch candidate videos via `yt-dlp --flat-playlist` (cached 24h)
+2. Fetch candidate videos via `yt-dlp --flat-playlist` + binary search for date boundaries (cached persistently)
 3. Filter by age, duration, and optionally match type
 4. Loop until `total_frames / frames_per_sample` clips collected:
    - Pick random video → sample biased timestamp → download short MP4 segment
@@ -56,7 +56,7 @@ src/ppa_frame_sampler/
 
 - **Clips, not frames**: The pipeline currently downloads short MP4 clips rather than extracting individual JPEG/PNG frames. Frame extraction and quality filtering modules exist but were decoupled from the pipeline to simplify initial usage.
 - **Per-run directories**: Each run creates `output/frames/<run_id>/` for isolation.
-- **24-hour cache**: Channel URL and video catalog lookups are cached in `output/.cache/youtube_cache.json` to avoid repeated yt-dlp calls.
+- **Persistent cache**: Channel URL and video catalog lookups are cached indefinitely in `output/.cache/youtube_cache.json` (no TTL). Each entry includes a `cached_date` for reference. Delete cache entries manually to refresh.
 - **No API key**: All YouTube interaction is via yt-dlp (search, flat-playlist, download-sections).
 
 ## Dependencies
@@ -75,11 +75,16 @@ Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment 
 
 ## Features
 
-- **Match Type Filtering (Singles/Doubles)** (2026-02-15) — [Details](.claude/context-docs/features/match-type-filtering.md)
-  Filter videos by match type (`--match-type singles|doubles|both`) using a title-based heuristic that detects `/` in player names to distinguish doubles from singles. "Unknown" titles are kept to avoid silent data loss.
+- **Match Type Filtering (Singles/Doubles)** (2026-02-16) — [Details](.claude/context-docs/features/match-type-filtering.md)
+  Filter videos by match type (`--match-type singles|doubles|both`) using a title-based heuristic that detects `/` in player names to distinguish doubles from singles. Recognises multiple separator formats (`vs`, `vs.`, `takes on`, `against`, `faces`) for both current and older PPA title styles.
 
 - **Minimum Age Filter (--min-age-days)** (2026-02-15) — [Details](.claude/context-docs/features/min-age-days-filter.md)
   Exclude videos uploaded more recently than N days ago, complementing `--max-age-days` to create a date-range window for video eligibility.
+
+## Performance
+
+- **Catalog Binary Search Optimization** (2026-02-16) — [Details](.claude/context-docs/performance/catalog-binary-search.md)
+  Rewrote `catalog.py` to use flat-playlist + binary search for date boundaries instead of sequential `--print` mode. Any date range (including 1-2 years old) now works efficiently. Fast path for entries with `upload_date` (tests), slow path with binary search for real YouTube.
 
 ## Refactors
 

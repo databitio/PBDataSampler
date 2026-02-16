@@ -20,9 +20,9 @@ The codebase is organized into five functional layers under `src/ppa_frame_sampl
 
 **1. YouTube Layer (`youtube/`)**
 - `channel_resolver.py` — Resolves channel URL via `yt-dlp ytsearch` with fallback to `@PPATour` handle
-- `catalog.py` — Fetches video metadata via `yt-dlp --flat-playlist`, filters by age/duration
+- `catalog.py` — Fetches video metadata via `yt-dlp --flat-playlist` + binary search for date boundaries, filters by age/duration
 - `models.py` — `VideoMeta` dataclass and `classify_match_type()` title heuristic
-- `cache.py` — 24-hour JSON file cache for channel URLs and video catalogs (`output/.cache/youtube_cache.json`)
+- `cache.py` — Persistent JSON file cache for channel URLs and video catalogs (`output/.cache/youtube_cache.json`), no TTL
 
 **2. Sampling Layer (`sampling/`)**
 - `timestamp_sampler.py` — Two bias modes: `hard_margin` (uniform within margins) and `soft_bias` (Beta(2.5, 2.5) distribution)
@@ -58,7 +58,7 @@ The codebase is organized into five functional layers under `src/ppa_frame_sampl
 CLI (cli.py)
   └── run_collection(cfg) in collector.py
         ├── resolve_channel_url() or --channel-url override
-        ├── list_recent_videos() with 24h cache
+        ├── list_recent_videos() with persistent cache
         ├── classify_match_type() filter (if --match-type != both)
         ├── Loop: total_frames / frames_per_sample iterations
         │     ├── random.choice(candidates)
@@ -73,7 +73,7 @@ CLI (cli.py)
 
 ```
 YouTube Channel URL
-  → yt-dlp flat-playlist → VideoMeta[] (cached 24h)
+  → yt-dlp flat-playlist + binary search → VideoMeta[] (persistent cache)
   → age/duration/match-type filters → candidate pool
   → random selection + biased timestamp → (video, start_s, end_s)
   → yt-dlp download-sections → MP4 clip in output/<run_id>/
@@ -104,7 +104,7 @@ YouTube Channel URL
 - **yt-dlp over YouTube API**: No API key required, simpler deployment, `--download-sections` enables segment-only downloads without full video fetches
 - **Clips-only pipeline**: Frame extraction and quality filtering modules exist but were decoupled from the main pipeline (`collector.py`) to simplify initial usage. Re-integration is a future task per PLAN.txt sections 5-8
 - **Beta(2.5, 2.5) for soft bias**: Bell-shaped distribution over normalized timestamp gives natural intro/outro avoidance without hard cutoffs
-- **Cache with filter-aware keys**: 24-hour TTL with composite keys ensures different filter configurations don't return stale results
+- **Persistent cache with filter-aware keys**: No TTL — cache entries persist indefinitely across sessions. Composite keys ensure different filter configurations use separate cache entries. Each entry includes a `cached_date` field for human reference.
 - **Per-run directories**: Each run creates `output/frames/<run_id>/` to prevent overwriting previous runs and enable comparison
 - **"Unknown" match types kept**: Videos that don't match singles/doubles patterns (highlights, compilations) are retained to avoid silent data loss
 - **Frozen dataclasses**: `Config` and `FilterThresholds` are immutable after construction, preventing accidental mutation during the pipeline
