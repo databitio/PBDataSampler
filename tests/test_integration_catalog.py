@@ -9,12 +9,14 @@ from ppa_frame_sampler.youtube.catalog import list_recent_videos
 CATALOG = "ppa_frame_sampler.youtube.catalog"
 
 
+@patch(f"{CATALOG}.set_cached_videos")
+@patch(f"{CATALOG}.get_cached_videos", return_value=None)
 @patch(f"{CATALOG}.ensure_tool", return_value="/fake/bin/yt-dlp")
 @patch(f"{CATALOG}.run_cmd_json")
 class TestListRecentVideos:
     """Catalog integration: filtering by age, duration, cap, and detail fetch."""
 
-    def test_excludes_old_videos(self, mock_json, mock_tool):
+    def test_excludes_old_videos(self, mock_json, mock_tool, _gc, _sc):
         entries = [
             build_ytdlp_entry("old1", 600, days_ago_date(400)),
             build_ytdlp_entry("new1", 600, days_ago_date(10)),
@@ -26,7 +28,7 @@ class TestListRecentVideos:
         assert len(result) == 1
         assert result[0].video_id == "new1"
 
-    def test_excludes_short_videos(self, mock_json, mock_tool):
+    def test_excludes_short_videos(self, mock_json, mock_tool, _gc, _sc):
         entries = [
             build_ytdlp_entry("short1", 60, days_ago_date(5)),
             build_ytdlp_entry("long1", 600, days_ago_date(5)),
@@ -38,7 +40,7 @@ class TestListRecentVideos:
         assert len(result) == 1
         assert result[0].video_id == "long1"
 
-    def test_combined_age_and_duration_filter(self, mock_json, mock_tool):
+    def test_combined_age_and_duration_filter(self, mock_json, mock_tool, _gc, _sc):
         entries = [
             build_ytdlp_entry("old_long", 600, days_ago_date(400)),
             build_ytdlp_entry("new_short", 60, days_ago_date(5)),
@@ -52,7 +54,7 @@ class TestListRecentVideos:
         assert len(result) == 1
         assert result[0].video_id == "new_long"
 
-    def test_max_videos_cap(self, mock_json, mock_tool):
+    def test_max_videos_cap(self, mock_json, mock_tool, _gc, _sc):
         entries = [
             build_ytdlp_entry(f"vid{i}", 600, days_ago_date(5))
             for i in range(20)
@@ -63,14 +65,14 @@ class TestListRecentVideos:
 
         assert len(result) == 5
 
-    def test_empty_playlist_returns_empty(self, mock_json, mock_tool):
+    def test_empty_playlist_returns_empty(self, mock_json, mock_tool, _gc, _sc):
         mock_json.return_value = build_ytdlp_playlist_json([])
 
         result = list_recent_videos("https://example.com/@ch", 365, 200, 120)
 
         assert result == []
 
-    def test_missing_metadata_triggers_detail_fetch(self, mock_json, mock_tool):
+    def test_missing_metadata_triggers_detail_fetch(self, mock_json, mock_tool, _gc, _sc):
         entry_no_duration = {
             "id": "vid_no_dur",
             "url": "https://www.youtube.com/watch?v=vid_no_dur",
@@ -87,3 +89,17 @@ class TestListRecentVideos:
         assert len(result) == 1
         assert result[0].video_id == "vid_no_dur"
         assert mock_json.call_count == 2
+
+    def test_fast_path_no_detail_fetches(self, mock_json, mock_tool, _gc, _sc):
+        """When all entries have metadata, only 1 run_cmd_json call is needed."""
+        entries = [
+            build_ytdlp_entry("vid1", 600, days_ago_date(5)),
+            build_ytdlp_entry("vid2", 800, days_ago_date(10)),
+        ]
+        mock_json.return_value = build_ytdlp_playlist_json(entries)
+
+        result = list_recent_videos("https://example.com/@ch", 365, 200, 120)
+
+        assert len(result) == 2
+        # Only 1 call: flat-playlist fetch.  No detail-fetches needed.
+        assert mock_json.call_count == 1
