@@ -8,6 +8,9 @@ The original specification is in [PLAN.txt](PLAN.txt) (§1–§16). The current 
 
 ## Architecture
 
+- **Project Architecture** (2026-02-15) — [Details](.claude/context-docs/architecture/project-architecture.md)
+  Full architecture documentation covering module layout, pipeline flow, data flow, and design decisions.
+
 ```
 src/ppa_frame_sampler/
 ├── cli.py                  # Argparse CLI, entry point
@@ -75,6 +78,9 @@ Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment 
 - **Match Type Filtering (Singles/Doubles)** (2026-02-15) — [Details](.claude/context-docs/features/match-type-filtering.md)
   Filter videos by match type (`--match-type singles|doubles|both`) using a title-based heuristic that detects `/` in player names to distinguish doubles from singles. "Unknown" titles are kept to avoid silent data loss.
 
+- **Minimum Age Filter (--min-age-days)** (2026-02-15) — [Details](.claude/context-docs/features/min-age-days-filter.md)
+  Exclude videos uploaded more recently than N days ago, complementing `--max-age-days` to create a date-range window for video eligibility.
+
 ## Refactors
 
 - **Clips-only pipeline** (2026-02-15) — Frame extraction (`media/extractor.py`) and burst quality filtering (`filter/quality_filter.py`) exist in the codebase but are not wired into `collector.py`. The pipeline currently saves MP4 clips directly. Re-integrating these modules is a future task per PLAN.txt §5–§8.
@@ -85,7 +91,7 @@ Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment 
 ppa-frame-sampler [OPTIONS]
 
 Channel:     --channel-query, --channel-url
-Eligibility: --max-age-days, --max-videos, --min-video-duration-s, --match-type
+Eligibility: --min-age-days, --max-age-days, --max-videos, --min-video-duration-s, --match-type
 Sampling:    --frames-per-sample, --total-frames, --seed
 Bias:        --bias-mode (hard_margin|soft_bias), --intro-margin-s, --outro-margin-s
 Output:      --out, --tmp, --format (jpg|png), --zip, --keep-tmp
