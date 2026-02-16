@@ -16,15 +16,16 @@ def list_recent_videos(
     max_age_days: int,
     max_videos: int,
     min_duration_s: int,
+    min_age_days: int = 0,
 ) -> List[VideoMeta]:
     """Return up to *max_videos* eligible videos from *channel_url*/videos.
 
-    Eligibility: ``upload_date`` within *max_age_days* and
-    ``duration >= min_duration_s``.
+    Eligibility: ``upload_date`` between *min_age_days* and *max_age_days* old,
+    and ``duration >= min_duration_s``.
 
     Results are cached for 24 hours to avoid repeated yt-dlp lookups.
     """
-    cached = get_cached_videos(channel_url, max_age_days, min_duration_s)
+    cached = get_cached_videos(channel_url, max_age_days, min_duration_s, min_age_days)
     if cached is not None:
         # Apply max_videos limit to cached results
         return cached[:max_videos]
@@ -40,7 +41,7 @@ def list_recent_videos(
         "--no-warnings",
         "-J",
         "--flat-playlist",
-        "--playlist-end", str(max_videos * 2),  # overfetch to handle filtering
+        "--playlist-end", str(max(max_videos * 2, max_age_days * 2)),  # overfetch to handle age/duration filtering
         videos_url,
     ]
 
@@ -55,7 +56,8 @@ def list_recent_videos(
         log.warning("No entries found in channel playlist")
         return []
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    oldest_cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    newest_cutoff = datetime.now(timezone.utc) - timedelta(days=min_age_days) if min_age_days > 0 else None
     eligible: List[VideoMeta] = []
 
     for entry in entries:
@@ -102,8 +104,11 @@ def list_recent_videos(
         # Filter: age
         try:
             vid_date = datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
-            if vid_date < cutoff:
+            if vid_date < oldest_cutoff:
                 log.debug("Skipping %s — too old (%s)", video_id, upload_date)
+                continue
+            if newest_cutoff and vid_date > newest_cutoff:
+                log.debug("Skipping %s — too recent (%s)", video_id, upload_date)
                 continue
         except ValueError:
             continue
@@ -120,5 +125,5 @@ def list_recent_videos(
         )
 
     log.info("Found %d eligible videos (from %d total entries)", len(eligible), len(entries))
-    set_cached_videos(channel_url, max_age_days, min_duration_s, eligible)
+    set_cached_videos(channel_url, max_age_days, min_duration_s, eligible, min_age_days)
     return eligible

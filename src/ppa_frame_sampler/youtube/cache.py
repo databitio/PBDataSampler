@@ -50,9 +50,9 @@ def set_cached_channel_url(query: str, url: str) -> None:
     _save_cache(cache)
 
 
-def get_cached_videos(channel_url: str, max_age_days: int, min_duration_s: int) -> Optional[List[VideoMeta]]:
+def get_cached_videos(channel_url: str, max_age_days: int, min_duration_s: int, min_age_days: int = 0) -> Optional[List[VideoMeta]]:
     cache = _load_cache()
-    key = f"{channel_url}|age={max_age_days}|dur={min_duration_s}"
+    key = f"{channel_url}|age={max_age_days}|minage={min_age_days}|dur={min_duration_s}"
     entry = cache.get("video_catalogs", {}).get(key)
     if not entry:
         return None
@@ -76,9 +76,10 @@ def set_cached_videos(
     max_age_days: int,
     min_duration_s: int,
     videos: List[VideoMeta],
+    min_age_days: int = 0,
 ) -> None:
     cache = _load_cache()
-    key = f"{channel_url}|age={max_age_days}|dur={min_duration_s}"
+    key = f"{channel_url}|age={max_age_days}|minage={min_age_days}|dur={min_duration_s}"
     cache.setdefault("video_catalogs", {})[key] = {
         "ts": time.time(),
         "videos": [

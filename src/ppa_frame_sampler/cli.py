@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--channel-url", default=None)
 
     # Video eligibility
+    p.add_argument("--min-age-days", type=int, default=0)
     p.add_argument("--max-age-days", type=int, default=365)
     p.add_argument("--max-videos", type=int, default=200)
     p.add_argument("--min-video-duration-s", type=int, default=120)
@@ -88,6 +89,7 @@ def main() -> None:
     cfg = Config(
         channel_query=args.channel_query,
         channel_url=args.channel_url,
+        min_age_days=args.min_age_days,
         max_age_days=args.max_age_days,
         max_videos=args.max_videos,
         min_video_duration_s=args.min_video_duration_s,

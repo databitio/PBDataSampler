@@ -39,6 +39,7 @@ def run_collection(cfg: Config) -> None:
         cfg.max_age_days,
         cfg.max_videos,
         cfg.min_video_duration_s,
+        cfg.min_age_days,
     )
     if not candidates:
         raise RuntimeError(
@@ -77,6 +78,7 @@ def run_collection(cfg: Config) -> None:
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "params": {
             "channel_url": channel_url,
+            "min_age_days": cfg.min_age_days,
             "max_age_days": cfg.max_age_days,
             "max_videos": cfg.max_videos,
             "min_video_duration_s": cfg.min_video_duration_s,

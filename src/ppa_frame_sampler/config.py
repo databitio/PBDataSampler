@@ -23,6 +23,7 @@ class Config:
     # YouTube / catalog
     channel_query: str = "PPA Tour"
     channel_url: Optional[str] = None
+    min_age_days: int = 0
     max_age_days: int = 365
     max_videos: int = 200
     min_video_duration_s: int = 120
