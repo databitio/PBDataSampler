@@ -23,6 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-age-days", type=int, default=365)
     p.add_argument("--max-videos", type=int, default=200)
     p.add_argument("--min-video-duration-s", type=int, default=120)
+    p.add_argument(
+        "--match-type",
+        choices=["singles", "doubles", "both"],
+        default="both",
+    )
 
     # Sampling
     p.add_argument("--frames-per-sample", type=int, default=20)
@@ -86,6 +91,7 @@ def main() -> None:
         max_age_days=args.max_age_days,
         max_videos=args.max_videos,
         min_video_duration_s=args.min_video_duration_s,
+        match_type=args.match_type,
         frames_per_sample=args.frames_per_sample,
         total_frames=args.total_frames,
         seed=args.seed,

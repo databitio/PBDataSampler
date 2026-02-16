@@ -16,6 +16,7 @@ from ppa_frame_sampler.sampling.segment_planner import plan_segment_len_s
 from ppa_frame_sampler.sampling.timestamp_sampler import sample_timestamp
 from ppa_frame_sampler.youtube.catalog import list_recent_videos
 from ppa_frame_sampler.youtube.channel_resolver import resolve_channel_url
+from ppa_frame_sampler.youtube.models import classify_match_type
 
 log = logging.getLogger("ppa_frame_sampler")
 
@@ -47,6 +48,23 @@ def run_collection(cfg: Config) -> None:
 
     log.info("Candidate pool: %d videos", len(candidates))
 
+    # ── Filter by match type ─────────────────────────────────────────
+    if cfg.match_type != "both":
+        total_before = len(candidates)
+        candidates = [
+            v for v in candidates
+            if classify_match_type(v.title) in (cfg.match_type, "unknown")
+        ]
+        log.info(
+            "Filtered to %d %s matches from %d candidates",
+            len(candidates), cfg.match_type, total_before,
+        )
+        if not candidates:
+            raise RuntimeError(
+                f"No {cfg.match_type} matches found among candidates. "
+                "Try relaxing filters or using --match-type both."
+            )
+
     # ── Prepare manifest ────────────────────────────────────────────
     run_id = generate_run_id(cfg.seed)
 
@@ -70,6 +88,7 @@ def run_collection(cfg: Config) -> None:
             "outro_margin_s": cfg.outro_margin_s,
             "buffer_seconds": cfg.buffer_seconds,
             "image_format": cfg.image_format,
+            "match_type": cfg.match_type,
         },
         "candidates": {"count": len(candidates)},
         "samples": [],
@@ -149,5 +168,6 @@ def _record_sample(
         "segment": {"start_s": start_s, "end_s": end_s},
         "status": status,
         "clip_name": clip_name,
+        "match_type": classify_match_type(video.title),
     }
     manifest["samples"].append(rec)

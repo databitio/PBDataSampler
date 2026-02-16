@@ -5,6 +5,7 @@ from typing import Literal, Optional
 
 BiasMode = Literal["hard_margin", "soft_bias"]
 ImageFormat = Literal["jpg", "png"]
+MatchType = Literal["singles", "doubles", "both"]
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class Config:
     max_age_days: int = 365
     max_videos: int = 200
     min_video_duration_s: int = 120
+    match_type: MatchType = "both"
 
     # Sampling
     frames_per_sample: int = 20
