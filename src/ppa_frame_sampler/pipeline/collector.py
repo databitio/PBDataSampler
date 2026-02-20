@@ -99,9 +99,20 @@ def run_collection(cfg: Config) -> None:
 
     # ── Collection loop ─────────────────────────────────────────────
     total_clips = cfg.total_frames // cfg.frames_per_sample or 1
+    max_errors = total_clips * cfg.max_retries_per_burst
     clip_idx = 0
 
     while clip_idx < total_clips:
+        if manifest["totals"]["download_errors"] >= max_errors:
+            log.error(
+                "Aborting: %d download errors reached limit (%d clips x %d retries). "
+                "Collected %d/%d clips.",
+                manifest["totals"]["download_errors"],
+                total_clips, cfg.max_retries_per_burst,
+                clip_idx, total_clips,
+            )
+            break
+
         video = random.choice(candidates)
 
         segment_len_s = plan_segment_len_s(

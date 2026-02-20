@@ -258,7 +258,7 @@ def list_recent_videos(
     Uses flat-playlist fetch + binary search for efficient access to any
     date range.
     """
-    cached = get_cached_videos(channel_url, max_age_days, min_duration_s, min_age_days)
+    cached = get_cached_videos(channel_url, max_age_days, min_duration_s, min_age_days, max_videos)
     if cached is not None:
         return cached[:max_videos]
 
@@ -308,5 +308,5 @@ def list_recent_videos(
         )
 
     log.info("Found %d eligible videos (from %d total entries)", len(eligible), len(entries))
-    set_cached_videos(channel_url, max_age_days, min_duration_s, eligible, min_age_days)
+    set_cached_videos(channel_url, max_age_days, min_duration_s, eligible, min_age_days, max_videos)
     return eligible

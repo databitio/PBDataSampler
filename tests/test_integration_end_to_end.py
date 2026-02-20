@@ -180,7 +180,7 @@ class TestEndToEnd:
     def test_download_errors_dont_count(self):
         """Download failures are recorded but don't count as collected clips."""
         with tempfile.TemporaryDirectory() as td:
-            cfg = _cfg(td, total_frames=10, frames_per_sample=10)
+            cfg = _cfg(td, total_frames=10, frames_per_sample=10, max_retries_per_burst=3)
 
             call_count = {"n": 0}
             def fail_then_succeed(cmd, timeout=120):
@@ -218,6 +218,21 @@ class TestEndToEnd:
             assert "run_id" in manifest
             assert "samples" in manifest
             assert len(manifest["samples"]) == 1
+
+    def test_error_cap_prevents_infinite_loop(self):
+        """All downloads failing should abort after max_retries_per_burst * clips errors."""
+        with tempfile.TemporaryDirectory() as td:
+            # 1 clip needed, max_retries_per_burst=3 → cap at 3 errors
+            cfg = _cfg(td, total_frames=10, frames_per_sample=10, max_retries_per_burst=3)
+            with mock_all_tools(
+                _failing_run_cmd,
+                _make_run_cmd_json_se(_playlist()),
+            ):
+                run_collection(cfg)
+
+            manifest = _get_manifest(cfg)
+            assert manifest["totals"]["clips_collected"] == 0
+            assert manifest["totals"]["download_errors"] == 3
 
     def test_manifest_in_run_subdirectory(self):
         """Manifest is written inside the run_id subdirectory, not the root."""
