@@ -3,16 +3,24 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ppa_frame_sampler.config import Config, FilterThresholds
+from ppa_frame_sampler.config import Config, CourtConfig, FilterThresholds
 from ppa_frame_sampler.logging_utils import setup_logging
 from ppa_frame_sampler.media.tools import ensure_tool
 from ppa_frame_sampler.pipeline.collector import run_collection
+from ppa_frame_sampler.pipeline.court_collector import run_court_collection
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ppa-frame-sampler",
         description="Sample consecutive frames from recent PPA Tour YouTube videos for CVAT labeling.",
+    )
+
+    # Mode
+    p.add_argument(
+        "--mode",
+        choices=["clips", "court-frames"],
+        default="clips",
     )
 
     # Channel
@@ -57,6 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reject-on-scene-cuts", action="store_true")
     p.add_argument("--scene-cut-rate-max", type=float, default=0.50)
 
+    # Court-frames mode options
+    p.add_argument("--court-out-dir", default="output/court_detections")
+    p.add_argument("--court-frame-format", choices=["jpg", "png"], default="jpg")
+    p.add_argument("--court-sample-attempts", type=int, default=5)
+    p.add_argument("--court-intro-margin-s", type=float, default=20.0)
+    p.add_argument("--court-outro-margin-s", type=float, default=20.0)
+    p.add_argument("--no-court-save-manifest", dest="court_save_manifest", action="store_false")
+    p.add_argument("--court-segment-seconds", type=float, default=2.0)
+    p.add_argument("--court-frames-per-attempt", type=int, default=3)
+    p.add_argument("--court-resize-width", type=int, default=640)
+
     return p
 
 
@@ -64,10 +83,20 @@ def main() -> None:
     args = build_parser().parse_args()
     log = setup_logging()
 
-    # Validate
-    if args.frames_per_sample <= 0 or args.total_frames <= 0:
-        print("frames-per-sample and total-frames must be > 0", file=sys.stderr)
-        sys.exit(2)
+    mode = args.mode
+
+    # Mode-specific validation
+    if mode == "clips":
+        if args.frames_per_sample <= 0 or args.total_frames <= 0:
+            print("frames-per-sample and total-frames must be > 0", file=sys.stderr)
+            sys.exit(2)
+    elif mode == "court-frames":
+        if args.court_sample_attempts <= 0:
+            print("court-sample-attempts must be > 0", file=sys.stderr)
+            sys.exit(2)
+        if args.court_frames_per_attempt <= 0:
+            print("court-frames-per-attempt must be > 0", file=sys.stderr)
+            sys.exit(2)
 
     # Fail-fast tool checks
     for tool in ("yt-dlp", "ffmpeg", "ffprobe"):
@@ -86,7 +115,20 @@ def main() -> None:
         scene_cut_rate_max=args.scene_cut_rate_max,
     )
 
+    court_cfg = CourtConfig(
+        court_out_dir=args.court_out_dir,
+        court_frame_format=args.court_frame_format,
+        court_sample_attempts=args.court_sample_attempts,
+        court_intro_margin_s=args.court_intro_margin_s,
+        court_outro_margin_s=args.court_outro_margin_s,
+        court_save_manifest=args.court_save_manifest,
+        court_segment_seconds=args.court_segment_seconds,
+        court_frames_per_attempt=args.court_frames_per_attempt,
+        court_resize_width=args.court_resize_width,
+    )
+
     cfg = Config(
+        mode=mode,
         channel_query=args.channel_query,
         channel_url=args.channel_url,
         min_age_days=args.min_age_days,
@@ -108,9 +150,13 @@ def main() -> None:
         make_zip=args.make_zip,
         keep_tmp=args.keep_tmp,
         thresholds=thresholds,
+        court=court_cfg,
     )
 
-    run_collection(cfg)
+    if mode == "clips":
+        run_collection(cfg)
+    else:
+        run_court_collection(cfg)
 
 
 if __name__ == "__main__":

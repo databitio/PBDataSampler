@@ -6,6 +6,7 @@ from typing import Literal, Optional
 BiasMode = Literal["hard_margin", "soft_bias"]
 ImageFormat = Literal["jpg", "png"]
 MatchType = Literal["singles", "doubles", "both"]
+PipelineMode = Literal["clips", "court-frames"]
 
 
 @dataclass(frozen=True)
@@ -19,7 +20,23 @@ class FilterThresholds:
 
 
 @dataclass(frozen=True)
+class CourtConfig:
+    court_out_dir: str = "output/court_detections"
+    court_frame_format: ImageFormat = "jpg"
+    court_sample_attempts: int = 5
+    court_intro_margin_s: float = 20.0
+    court_outro_margin_s: float = 20.0
+    court_save_manifest: bool = True
+    court_segment_seconds: float = 2.0
+    court_frames_per_attempt: int = 3
+    court_resize_width: int = 640
+
+
+@dataclass(frozen=True)
 class Config:
+    # Pipeline mode
+    mode: PipelineMode = "clips"
+
     # YouTube / catalog
     channel_query: str = "PPA Tour"
     channel_url: Optional[str] = None
@@ -48,6 +65,9 @@ class Config:
 
     # Filter
     thresholds: FilterThresholds = field(default_factory=FilterThresholds)
+
+    # Court-frames mode
+    court: CourtConfig = field(default_factory=CourtConfig)
 
     # Performance knobs
     analysis_frame_count: int = 5

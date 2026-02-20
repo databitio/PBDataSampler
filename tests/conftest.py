@@ -148,3 +148,19 @@ def make_extract_side_effect(
             args=cmd, returncode=0, stdout="", stderr="",
         )
     return side_effect
+
+
+# ---------------------------------------------------------------------------
+# Court-frame writers
+# ---------------------------------------------------------------------------
+
+def court_frame_writer(path: Path) -> None:
+    """Write one blue court-like image with white lines (scores high)."""
+    img = np.full((480, 640, 3), (200, 100, 30), dtype=np.uint8)
+    cv2.line(img, (50, 100), (590, 100), (255, 255, 255), 2)
+    cv2.line(img, (50, 380), (590, 380), (255, 255, 255), 2)
+    cv2.line(img, (50, 100), (50, 380), (255, 255, 255), 2)
+    cv2.line(img, (590, 100), (590, 380), (255, 255, 255), 2)
+    cv2.line(img, (320, 100), (320, 380), (255, 255, 255), 2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(path), img)
