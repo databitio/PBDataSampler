@@ -30,12 +30,13 @@ The codebase is organized into five functional layers under `src/ppa_frame_sampl
 
 **3. Media Layer (`media/`)**
 - `downloader.py` — Uses `yt-dlp --download-sections` for segment-only downloads (no full videos)
-- `extractor.py` — ffmpeg-based frame extraction (exists but not wired into current pipeline)
+- `extractor.py` — ffmpeg-based frame extraction (used by court-frames pipeline)
 - `ffprobe.py` — Duration/FPS queries via ffprobe
 - `tools.py` — Tool path resolution (`ensure_tool()`), subprocess helpers (`run_cmd`, `run_cmd_json`)
 
 **4. Filter Layer (`filter/`)**
-- `quality_filter.py` — Burst evaluator using OpenCV metrics (exists but not wired into current pipeline)
+- `quality_filter.py` — Burst evaluator using OpenCV metrics (exists but not wired into clips pipeline)
+- `court_scorer.py` — Court-presence scoring: `CourtScore` dataclass, 4 metrics (line density, court color ratio, blur, overlay penalty), composite formula, `pick_best_frame()`
 - `metrics.py` — Five heuristic metrics: motion score, static score, edge density, overlay coverage, scene-cut rate
 - `models.py` — `FilterDecision` and `FilterMetrics` dataclasses
 
@@ -46,14 +47,16 @@ The codebase is organized into five functional layers under `src/ppa_frame_sampl
 - `cleanup.py` — Temp directory cleanup
 
 **6. Orchestration**
-- `cli.py` — Argparse CLI with all flags, fail-fast tool checks (`yt-dlp`, `ffmpeg`, `ffprobe`)
-- `config.py` — `Config` and `FilterThresholds` frozen dataclasses
-- `pipeline/collector.py` — Main `run_collection()` loop: resolve -> catalog -> filter -> sample -> download -> manifest
+- `cli.py` — Argparse CLI with `--mode` dispatch, fail-fast tool checks (`yt-dlp`, `ffmpeg`, `ffprobe`)
+- `config.py` — `Config`, `CourtConfig`, and `FilterThresholds` frozen dataclasses; `PipelineMode` type alias
+- `pipeline/collector.py` — Clips pipeline `run_collection()`: resolve -> catalog -> filter -> sample -> download -> manifest
+- `pipeline/court_collector.py` — Court-frames pipeline `run_court_collection()`: resolve -> catalog -> filter -> per-video scoring -> save best frame -> manifest
 - `run_id.py` — Timestamped run-ID generation
 - `logging_utils.py` — Logging setup
 
-### Current Pipeline Flow
+### Pipeline Flows
 
+**Clips mode** (`--mode clips`, default):
 ```
 CLI (cli.py)
   └── run_collection(cfg) in collector.py
@@ -67,6 +70,24 @@ CLI (cli.py)
         │     └── Record to manifest (collected or download_error)
         ├── write_manifest() -> run_manifest.json
         └── Optional: zip_frames()
+```
+
+**Court-frames mode** (`--mode court-frames`):
+```
+CLI (cli.py)
+  └── run_court_collection(cfg) in court_collector.py
+        ├── resolve_channel_url() or --channel-url override
+        ├── list_recent_videos() with persistent cache
+        ├── classify_match_type() filter (if --match-type != both)
+        ├── For each video:
+        │     ├── N attempts (court_sample_attempts):
+        │     │     ├── sample_timestamp() with court margins
+        │     │     ├── download_segment() (1-2s clip)
+        │     │     ├── extract_frames() (3-5 frames per clip)
+        │     │     └── pick_best_frame() with court scoring
+        │     ├── If best score >= court_min_score: save to output
+        │     └── Else: record as skipped
+        └── write court_detection_manifest.json
 ```
 
 ### Data Flow
@@ -102,11 +123,11 @@ YouTube Channel URL
 ## Key Decisions
 
 - **yt-dlp over YouTube API**: No API key required, simpler deployment, `--download-sections` enables segment-only downloads without full video fetches
-- **Clips-only pipeline**: Frame extraction and quality filtering modules exist but were decoupled from the main pipeline (`collector.py`) to simplify initial usage. Re-integration is a future task per PLAN.txt sections 5-8
+- **Dual pipeline architecture**: `--mode clips` (clips) and `--mode court-frames` (court-frames) share channel/catalog/sampling infrastructure but diverge at the output stage. Frame extraction is used by court-frames mode; quality filtering modules exist but are not wired into clips mode (re-integration is a future task per PLAN.txt sections 5-8)
 - **Beta(2.5, 2.5) for soft bias**: Bell-shaped distribution over normalized timestamp gives natural intro/outro avoidance without hard cutoffs
 - **Persistent cache with filter-aware keys**: No TTL — cache entries persist indefinitely across sessions. Composite keys ensure different filter configurations use separate cache entries. Each entry includes a `cached_date` field for human reference.
 - **Per-run directories**: Each run creates `output/frames/<run_id>/` to prevent overwriting previous runs and enable comparison
-- **"Unknown" match types kept**: Videos that don't match singles/doubles patterns (highlights, compilations) are retained to avoid silent data loss
+- **"Unknown" match types excluded**: When `--match-type` is set to `singles` or `doubles`, videos classified as `"unknown"` are excluded (only exact matches kept)
 - **Frozen dataclasses**: `Config` and `FilterThresholds` are immutable after construction, preventing accidental mutation during the pipeline
 
 ## Tradeoffs

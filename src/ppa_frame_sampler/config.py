@@ -30,6 +30,7 @@ class CourtConfig:
     court_segment_seconds: float = 2.0
     court_frames_per_attempt: int = 3
     court_resize_width: int = 640
+    court_min_score: float = 0.15
 
 
 @dataclass(frozen=True)

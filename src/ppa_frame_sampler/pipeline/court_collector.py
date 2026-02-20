@@ -85,6 +85,7 @@ def run_court_collection(cfg: Config) -> None:
             "court_segment_seconds": court.court_segment_seconds,
             "court_frames_per_attempt": court.court_frames_per_attempt,
             "court_resize_width": court.court_resize_width,
+            "court_min_score": court.court_min_score,
             "seed": cfg.seed,
         },
         "candidates": {"count": len(candidates)},
@@ -159,7 +160,7 @@ def run_court_collection(cfg: Config) -> None:
         # ── Save best frame or record skip ───────────────────────────
         manifest["totals"]["videos_processed"] += 1
 
-        if best_path is not None and best_score is not None:
+        if best_path is not None and best_score is not None and best_score.composite >= court.court_min_score:
             ts_ms = int(best_ts * 1000)
             ext = court.court_frame_format
             out_name = f"{safe_slug(video.video_id)}_{ts_ms:010d}ms.{ext}"

@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--court-segment-seconds", type=float, default=2.0)
     p.add_argument("--court-frames-per-attempt", type=int, default=3)
     p.add_argument("--court-resize-width", type=int, default=640)
+    p.add_argument("--court-min-score", type=float, default=0.15)
 
     return p
 
@@ -125,6 +126,7 @@ def main() -> None:
         court_segment_seconds=args.court_segment_seconds,
         court_frames_per_attempt=args.court_frames_per_attempt,
         court_resize_width=args.court_resize_width,
+        court_min_score=args.court_min_score,
     )
 
     cfg = Config(

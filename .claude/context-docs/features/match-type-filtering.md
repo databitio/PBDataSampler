@@ -19,7 +19,7 @@ A title-based heuristic classifies videos by splitting on a matchup separator an
 - **Classification logic**: Split the title on a matchup separator. If either side (before context suffix on the right) contains `/`, classify as `"doubles"`. Otherwise `"singles"`. If no separator found, return `"unknown"`.
 - **Recognised separators** (case-insensitive): `vs`, `vs.`, `v`, `takes on`, `against`, `faces`
 - **Context stripping**: Tournament/venue suffixes are removed from the right side using patterns like `" at the "`, `" on Championship "`, `" in "` before checking for `/`.
-- **Unknown handling**: Videos classified as `"unknown"` are kept (not excluded) to avoid silently dropping non-match content like highlights or compilations.
+- **Unknown handling**: Videos classified as `"unknown"` are excluded when filtering for singles or doubles (only exact type matches are kept). When `--match-type both`, no filtering is applied and all videos pass through.
 - **Traceability**: Each sample record in the manifest includes its classified `match_type`, and the overall `match_type` filter is recorded in manifest params.
 
 ## Code Changes
@@ -39,20 +39,20 @@ A title-based heuristic classifies videos by splitting on a matchup separator an
 - Title parsing uses compiled regexes (`_VERSUS_RE`, `_CONTEXT_RE`) with `re.IGNORECASE` for robustness against case variations.
 - Multiple separator patterns handle both current ("vs") and older ("takes on", "vs.", "against", "faces") PPA title formats.
 - Context stripping removes tournament suffixes ("at the", "on Championship", "in") from the right side before checking for `/`.
-- Filter is a list comprehension keeping entries matching the target type OR `"unknown"`.
+- Filter is a list comprehension keeping entries where `classify_match_type(v.title) == cfg.match_type` (exact match only).
 
 ## Key Decisions
 
 - **Heuristic over metadata**: PPA Tour video titles follow a consistent naming convention, making title parsing reliable without needing YouTube API metadata or manual tagging.
 - **Multiple separator patterns**: Older PPA videos (1-2+ years) use different title formats than recent ones (e.g., "takes on" instead of "vs"). Compiled regexes handle both eras.
-- **Keep "unknown" videos**: Non-match videos (highlights, compilations) are not excluded when filtering, preventing silent data loss.
+- **Exclude "unknown" when filtering**: When filtering for singles or doubles, only exact type matches are kept. Unknown videos (highlights, compilations) are excluded. When `--match-type both`, no filtering occurs.
 - **Filter placement**: Filtering happens after `list_recent_videos()` returns but before the sampling loop, so the candidate count in the manifest reflects the post-filter pool.
 - **Default "both"**: No filtering by default, preserving backward compatibility.
 
 ## Tradeoffs
 
 - **Pros**: Simple heuristic, no external dependencies, backward compatible, full traceability in manifest
-- **Cons**: Heuristic depends on PPA Tour title conventions; unusual titles could be misclassified; "unknown" videos leak through when filtering (by design); new title formats may require adding more separator patterns
+- **Cons**: Heuristic depends on PPA Tour title conventions; unusual titles could be misclassified; "unknown" videos are silently excluded when filtering for singles/doubles; new title formats may require adding more separator patterns
 
 ## Related Files
 

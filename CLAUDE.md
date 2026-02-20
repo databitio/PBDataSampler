@@ -4,7 +4,7 @@
 
 PPA Frame Sampler (`ppa-frame-sampler`) is a CLI tool that samples video data from recent PPA Tour YouTube videos for CVAT labeling and model training. It requires no YouTube API key — it uses `yt-dlp` for all YouTube interactions.
 
-The original specification is in [PLAN.txt](PLAN.txt) (§1–§16). The court detection feature spec is in [CourtDetectionPlan.md](CourtDetectionPlan.md) (§1–§16). The current implementation covers the clips pipeline (channel resolution, video cataloging, timestamp sampling, segment download). Frame extraction and burst quality filtering exist in the codebase but are not wired into the clips pipeline (see Refactors below). The court-frames pipeline is planned (see Features).
+The original specification is in [PLAN.txt](PLAN.txt) (§1–§16). The court detection feature spec is in [CourtDetectionPlan.md](CourtDetectionPlan.md) (§1–§16). The current implementation covers both the clips pipeline (channel resolution, video cataloging, timestamp sampling, segment download) and the court-frames pipeline (per-video court-visible frame extraction with heuristic scoring). Frame extraction and burst quality filtering exist in the codebase but are not wired into the clips pipeline (see Refactors below).
 
 ## Architecture
 
@@ -27,12 +27,12 @@ src/ppa_frame_sampler/
 │   └── segment_planner.py   # Compute segment length from frames_per_sample + buffer
 ├── media/
 │   ├── downloader.py       # yt-dlp --download-sections segment download
-│   ├── extractor.py        # ffmpeg frame extraction (not used in current pipeline)
+│   ├── extractor.py        # ffmpeg frame extraction (used by court-frames pipeline)
 │   ├── ffprobe.py          # ffprobe duration/fps queries
 │   └── tools.py            # Tool path resolution, subprocess helpers
 ├── filter/
 │   ├── quality_filter.py   # Burst quality evaluator (not used in current pipeline)
-│   ├── court_scorer.py     # Court-presence scoring heuristics (PLANNED)
+│   ├── court_scorer.py     # Court-presence scoring heuristics (line density, color, blur, overlay)
 │   ├── metrics.py          # Motion, static, edge, overlay, scene-cut metrics (OpenCV)
 │   └── models.py           # FilterDecision, FilterMetrics dataclasses
 ├── output/
@@ -42,7 +42,7 @@ src/ppa_frame_sampler/
 │   └── cleanup.py          # Temp directory cleanup
 └── pipeline/
     ├── collector.py        # Clips collection loop (run_collection)
-    └── court_collector.py  # Court-frame collection loop (PLANNED)
+    └── court_collector.py  # Court-frame collection loop (run_court_collection)
 ```
 
 ### Pipeline Flow — Clips Mode (`--mode clips`, default)
@@ -54,20 +54,20 @@ src/ppa_frame_sampler/
    - Pick random video → sample biased timestamp → download short MP4 segment
 5. Write `run_manifest.json` + optional zip
 
-### Pipeline Flow — Court-Frames Mode (`--mode court-frames`, planned)
+### Pipeline Flow — Court-Frames Mode (`--mode court-frames`)
 
 1. Resolve channel URL + fetch/filter candidates (same as clips mode)
 2. For each eligible video:
    a. Generate N candidate timestamps (biased away from intros/outros)
    b. Download 1–2s clip per candidate → extract 3–5 frames
-   c. Score each frame for court presence (line density, court color, geometry, overlay penalty, blur)
-   d. Keep highest-scoring accepted frame (or skip video)
+   c. Score each frame for court presence (line density, court color, blur, overlay penalty)
+   d. Keep highest-scoring frame above `court_min_score` threshold (or skip video)
 3. Save frames to flat `output/court_detections/` directory
 4. Write `court_detection_manifest.json`
 
 ### Key Design Decisions
 
-- **Two pipeline modes**: `--mode clips` (default) downloads short MP4 clips for CVAT labeling. `--mode court-frames` (planned) extracts one court-visible frame per video for keypoint model training.
+- **Two pipeline modes**: `--mode clips` (default) downloads short MP4 clips for CVAT labeling. `--mode court-frames` extracts one court-visible frame per video for keypoint model training.
 - **Clips, not frames (clips mode)**: The clips pipeline downloads short MP4 clips rather than extracting individual JPEG/PNG frames. Frame extraction and quality filtering modules exist but were decoupled from the clips pipeline to simplify initial usage.
 - **Per-run directories (clips mode)**: Each clips run creates `output/frames/<run_id>/` for isolation.
 - **Flat output (court-frames mode)**: Court frames go to a single `output/court_detections/` directory (no per-run subdirs) for training data ingest.
@@ -86,12 +86,12 @@ src/ppa_frame_sampler/
 pytest tests/
 ```
 
-Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment planner, manifest schema, config validation, heuristic validation (known static/live-play frames), integration tests for catalog, burst pipeline, and end-to-end flow.
+Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment planner, manifest schema, config validation, heuristic validation (known static/live-play frames), court scorer unit tests, integration tests for catalog, burst pipeline, clips end-to-end, and court-frames end-to-end.
 
 ## Features
 
-- **Court Detection Dataset Mode** (2026-02-20, planned) — [Details](.claude/context-docs/features/court-detection-mode.md) | [Spec](CourtDetectionPlan.md)
-  New `--mode court-frames` pipeline: extracts one court-visible frame per eligible video into a flat `output/court_detections/` directory for court keypoint model training. Uses heuristic scoring (line density, court color, geometry, overlay penalty, blur) to select the best frame per video. Reuses existing channel/catalog/sampling infrastructure; adds new court-presence scoring and per-video frame selection.
+- **Court Detection Dataset Mode** (2026-02-20) — [Details](.claude/context-docs/features/court-detection-mode.md) | [Spec](CourtDetectionPlan.md)
+  `--mode court-frames` pipeline: extracts one court-visible frame per eligible video into a flat `output/court_detections/` directory for court keypoint model training. Uses heuristic scoring (line density, court color, blur, overlay penalty) with a configurable minimum score threshold. Reuses existing channel/catalog/sampling infrastructure; adds court-presence scoring and per-video frame selection.
 
 - **Match Type Filtering (Singles/Doubles)** (2026-02-16) — [Details](.claude/context-docs/features/match-type-filtering.md)
   Filter videos by match type (`--match-type singles|doubles|both`) using a title-based heuristic that detects `/` in player names to distinguish doubles from singles. Recognises multiple separator formats (`vs`, `vs.`, `takes on`, `against`, `faces`) for both current and older PPA title styles.
@@ -106,14 +106,14 @@ Tests cover: slug/naming sanitization, timestamp sampler bounds & bias, segment 
 
 ## Refactors
 
-- **Clips-only pipeline** (2026-02-15) — Frame extraction (`media/extractor.py`) and burst quality filtering (`filter/quality_filter.py`) exist in the codebase but are not wired into `collector.py`. The clips pipeline saves MP4 clips directly. Re-integrating these into clips mode is a future task per PLAN.txt §5–§8. Note: `extractor.py` will be activated by the planned court-frames mode.
+- **Clips-only pipeline** (2026-02-15) — Frame extraction (`media/extractor.py`) and burst quality filtering (`filter/quality_filter.py`) exist in the codebase but are not wired into `collector.py`. The clips pipeline saves MP4 clips directly. Re-integrating these into clips mode is a future task per PLAN.txt §5–§8. Note: `extractor.py` is now used by the court-frames pipeline.
 
 ## CLI Quick Reference
 
 ```
 ppa-frame-sampler [OPTIONS]
 
-Mode:        --mode (clips|court-frames)                              # PLANNED
+Mode:        --mode (clips|court-frames)
 
 Shared:      --channel-query, --channel-url
              --min-age-days, --max-age-days, --max-videos, --min-video-duration-s, --match-type
@@ -126,7 +126,9 @@ Clips mode:  --frames-per-sample, --total-frames
              --max-overlay-coverage, --reject-on-scene-cuts, --scene-cut-rate-max
              --buffer-seconds, --max-retries-per-burst
 
-Court mode:  --court-out-dir, --court-frame-format (jpg|png)          # PLANNED
-             --court-sample-attempts-per-video, --court-intro-margin-s
-             --court-outro-margin-s, --court-save-manifest
+Court mode:  --court-out-dir, --court-frame-format (jpg|png)
+             --court-sample-attempts, --court-frames-per-attempt
+             --court-intro-margin-s, --court-outro-margin-s
+             --court-segment-seconds, --court-resize-width
+             --court-min-score, --no-court-save-manifest
 ```

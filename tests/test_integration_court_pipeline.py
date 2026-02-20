@@ -301,6 +301,42 @@ class TestCourtPipelineEndToEnd:
             assert len(frames) == 1
 
 
+    def test_min_score_threshold_rejects_low_frames(self):
+        """Frames below court_min_score should be skipped even if extracted."""
+        with tempfile.TemporaryDirectory() as td:
+            # Set threshold very high so court frames will be rejected
+            cfg = _court_cfg(td, court_min_score=0.99)
+            with mock_all_tools(
+                _make_run_cmd_se(court_frame_writer, 3),
+                _make_run_cmd_json_se(_playlist(2)),
+            ):
+                run_court_collection(cfg)
+
+            out_dir = Path(cfg.court.court_out_dir)
+            frames = list(out_dir.glob("*.jpg"))
+            assert len(frames) == 0
+
+            manifest_path = out_dir / "court_detection_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assert manifest["totals"]["videos_processed"] == 2
+            assert manifest["totals"]["frames_saved"] == 0
+            assert manifest["totals"]["videos_skipped"] == 2
+
+    def test_min_score_threshold_in_manifest_params(self):
+        """court_min_score should appear in manifest params."""
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _court_cfg(td, court_min_score=0.20)
+            with mock_all_tools(
+                _make_run_cmd_se(court_frame_writer, 3),
+                _make_run_cmd_json_se(_playlist(1)),
+            ):
+                run_court_collection(cfg)
+
+            manifest_path = Path(cfg.court.court_out_dir) / "court_detection_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assert manifest["params"]["court_min_score"] == 0.20
+
+
 class TestClipsRegressionFromCourt:
     """Verify clips pipeline still works after court-frames changes."""
 

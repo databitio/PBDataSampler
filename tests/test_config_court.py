@@ -17,6 +17,7 @@ class TestCourtConfigDefaults:
         assert cc.court_segment_seconds == 2.0
         assert cc.court_frames_per_attempt == 3
         assert cc.court_resize_width == 640
+        assert cc.court_min_score == 0.15
 
     def test_custom_values(self):
         cc = CourtConfig(
@@ -79,6 +80,7 @@ class TestCLIParsing:
             "--court-segment-seconds", "3.0",
             "--court-frames-per-attempt", "5",
             "--court-resize-width", "320",
+            "--court-min-score", "0.25",
         ])
         assert args.mode == "court-frames"
         assert args.court_out_dir == "/custom/out"
@@ -90,6 +92,7 @@ class TestCLIParsing:
         assert args.court_segment_seconds == 3.0
         assert args.court_frames_per_attempt == 5
         assert args.court_resize_width == 320
+        assert args.court_min_score == 0.25
 
     def test_default_mode_is_clips(self):
         from ppa_frame_sampler.cli import build_parser

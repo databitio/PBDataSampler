@@ -2,7 +2,7 @@
 
 **Type**: Feature
 **Date**: 2026-02-20
-**Status**: Planned
+**Status**: Complete
 
 ## Overview
 
@@ -31,24 +31,27 @@ New flags scoped to court-frame mode:
 |---|---|---|
 | `--court-out-dir` | `output/court_detections` | Output directory for court frames |
 | `--court-frame-format` | `jpg` | Image format (jpg/png) |
-| `--court-sample-attempts-per-video` | `5` | Candidate timestamps to try per video |
+| `--court-sample-attempts` | `5` | Candidate timestamps to try per video |
+| `--court-frames-per-attempt` | `3` | Frames to extract per candidate clip |
+| `--court-segment-seconds` | `2.0` | Clip length per candidate timestamp |
 | `--court-intro-margin-s` | `20` | Seconds to skip at video start |
 | `--court-outro-margin-s` | `20` | Seconds to skip at video end |
-| `--court-save-manifest` | `true` | Write court_detection_manifest.json |
+| `--court-resize-width` | `640` | Resize width for scoring |
+| `--court-min-score` | `0.15` | Minimum composite score to accept a frame |
+| `--no-court-save-manifest` | *(on)* | Disable writing court_detection_manifest.json |
 
 ### Pipeline Flow (Per Video)
 
 1. **Generate candidate timestamps** — Sample N timestamps per video using existing bias logic (hard_margin or soft_bias), biased away from intros/outros
 2. **Download tiny clip** — Download a 1-2 second MP4 clip around each candidate timestamp (reuses existing yt-dlp download machinery)
 3. **Extract candidate frames** — Pull 3-5 evenly spaced frames from each clip (reuses `media/extractor.py`)
-4. **Score frames for court presence** — Heuristic scoring stack:
-   - Line density / Hough line structure (courts have many straight lines)
-   - Court-color area (HSV clustering for dominant court color regions)
-   - Perspective geometry cues (converging lines, rectangular structure)
-   - Overlay penalty (penalise static high-contrast blocks near corners)
+4. **Score frames for court presence** — Composite heuristic scoring (`filter/court_scorer.py`):
+   - Line density (Canny + HoughLinesP pixel coverage)
+   - Court-color ratio (HSV masks for blue/green/orange court surfaces)
    - Blur score (Laplacian variance — prefer sharp frames)
-   - Scene-cut rejection (reuse existing scene-cut heuristics)
-5. **Select best frame** — Across all attempts for a video, keep the highest-scoring accepted frame (or skip the video if all fail)
+   - Overlay penalty (edge density in top/bottom 15% scoreboard bands)
+   - Composite formula: `0.35 * line_norm + 0.30 * color + 0.20 * blur_norm - 0.15 * overlay`
+5. **Select best frame** — Across all attempts for a video, keep the highest-scoring frame above `court_min_score` threshold (or skip the video if all fail)
 6. **Save frame + manifest entry**
 
 ### Output Structure
@@ -72,9 +75,8 @@ output/court_detections/
 
 ### New Modules
 
-- `pipeline/court_collector.py` — Court-frame collection loop (parallel to `pipeline/collector.py`)
-- `filter/court_scorer.py` — Court-presence scoring heuristics (line density, color, geometry, overlay penalty, blur)
-- Possibly `output/court_manifest.py` if manifest schema diverges enough from existing `manifest.py`
+- `pipeline/court_collector.py` — Court-frame collection loop (`run_court_collection()`)
+- `filter/court_scorer.py` — Court-presence scoring (`CourtScore` dataclass, `score_frame()`, `pick_best_frame()`)
 
 ### Reused Components
 
@@ -83,8 +85,7 @@ output/court_detections/
 - Age/duration/match-type filtering
 - Timestamp sampling with bias (`sampling/timestamp_sampler.py`)
 - Segment download (`media/downloader.py`)
-- Frame extraction (`media/extractor.py` — currently unwired, will be activated for this mode)
-- Some filter metrics (`filter/metrics.py` — edge density, scene-cut)
+- Frame extraction (`media/extractor.py` — activated by this mode)
 - safe_slug naming, manifest writing
 
 ## Key Decisions
@@ -128,18 +129,20 @@ output/court_detections/
 
 ## Testing / Verification
 
-- [ ] Unit: court scorer returns deterministic scores on fixture images
-- [ ] Unit: timestamp candidate generation respects margins
-- [ ] Unit: manifest schema validation
-- [ ] Unit: filename generation
-- [ ] Unit: best-frame selection logic
-- [ ] Integration: mock catalog -> run court mode -> outputs one frame/video
-- [ ] Integration: failure handling (download fail / no valid frame)
-- [ ] Integration: reproducibility with --seed
-- [ ] Regression: existing clips mode still works unchanged
+- [x] Unit: court scorer returns deterministic scores on fixture images (`test_court_scorer.py`)
+- [x] Unit: CourtConfig defaults and construction (`test_config_court.py`)
+- [x] Unit: CLI arg parsing for court flags (`test_config_court.py`)
+- [x] Unit: best-frame selection logic (`test_court_scorer.py::TestPickBestFrame`)
+- [x] Integration: mock catalog -> run court mode -> outputs one frame/video (`test_integration_court_pipeline.py`)
+- [x] Integration: failure handling — download fail / no valid frame (`test_integration_court_pipeline.py::test_skipped_videos_recorded`)
+- [x] Integration: manifest structure and content (`test_integration_court_pipeline.py::test_manifest_written`)
+- [x] Integration: minimum score threshold rejects low frames (`test_integration_court_pipeline.py::test_min_score_threshold_rejects_low_frames`)
+- [x] Integration: PNG format support (`test_integration_court_pipeline.py::test_png_format`)
+- [x] Regression: existing clips mode still works unchanged (`test_integration_court_pipeline.py::TestClipsRegressionFromCourt`)
 
 ## Notes
 
-- The `media/extractor.py` module exists but is currently unwired from the clips pipeline. Court-frame mode will be the first pipeline to actually use it.
-- Court-presence scoring is the only truly new logic; everything else (catalog, sampling, download, extraction) is reused from the existing codebase.
-- The `--mode` flag will require restructuring `cli.py` to dispatch to different pipelines, but both pipelines share the same channel/eligibility arguments.
+- The `media/extractor.py` module is now used by the court-frames pipeline (first pipeline to activate it).
+- Court-presence scoring (`filter/court_scorer.py`) is the only truly new logic; everything else (catalog, sampling, download, extraction) is reused.
+- The `--mode` flag dispatches to `run_collection()` or `run_court_collection()` in `cli.py`. Both pipelines share channel/eligibility arguments.
+- A configurable `--court-min-score` threshold (default 0.15) rejects frames with composite scores below the minimum, ensuring quality output.
