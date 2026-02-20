@@ -11,8 +11,8 @@ def test_default_config():
 
 def test_filter_thresholds_defaults():
     t = FilterThresholds()
-    assert t.min_motion_score == 0.10
-    assert t.max_static_score == 0.70
-    assert t.min_edge_density == 0.02
-    assert t.max_overlay_coverage == 0.45
+    assert t.min_motion_score == 0.015
+    assert t.max_static_score == 0.92
+    assert t.min_edge_density == 0.01
+    assert t.max_overlay_coverage == 0.70
     assert t.reject_on_scene_cuts is False

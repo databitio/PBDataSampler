@@ -1,6 +1,10 @@
 """End-to-end integration tests for ``run_collection()`` with all external
 tools mocked.
 
+The clips pipeline downloads short MP4 segments (no frame extraction or burst
+filtering).  Each run creates a ``<run_id>/`` subdirectory under ``out_dir``
+and writes ``run_manifest.json`` inside it.
+
 Patches target every import site (catalog, downloader, extractor, ffprobe)
 because each module uses ``from ppa_frame_sampler.media.tools import …``.
 """
@@ -18,8 +22,6 @@ from conftest import (
     build_ytdlp_entry,
     build_ytdlp_playlist_json,
     days_ago_date,
-    noise_frame_writer,
-    static_frame_writer,
 )
 from ppa_frame_sampler.config import Config
 from ppa_frame_sampler.pipeline.collector import run_collection
@@ -39,11 +41,15 @@ _RUN_CMD_JSON_SITES = [
     "ppa_frame_sampler.youtube.catalog.run_cmd_json",
     "ppa_frame_sampler.media.ffprobe.run_cmd_json",
 ]
+_CACHE_SITES = [
+    "ppa_frame_sampler.youtube.catalog.get_cached_videos",
+    "ppa_frame_sampler.youtube.catalog.set_cached_videos",
+]
 
 
 @contextlib.contextmanager
 def mock_all_tools(run_cmd_side_effect, run_cmd_json_side_effect):
-    """Patch ensure_tool / run_cmd / run_cmd_json at every import site."""
+    """Patch ensure_tool / run_cmd / run_cmd_json / cache at every import site."""
     with contextlib.ExitStack() as stack:
         for t in _ENSURE_TOOL_SITES:
             stack.enter_context(
@@ -57,6 +63,13 @@ def mock_all_tools(run_cmd_side_effect, run_cmd_json_side_effect):
             stack.enter_context(
                 patch(t, side_effect=run_cmd_json_side_effect),
             )
+        # Bypass persistent cache so tests get fresh data
+        stack.enter_context(
+            patch(_CACHE_SITES[0], return_value=None),
+        )
+        stack.enter_context(
+            patch(_CACHE_SITES[1]),
+        )
         yield
 
 
@@ -64,49 +77,29 @@ def mock_all_tools(run_cmd_side_effect, run_cmd_json_side_effect):
 # Dispatching side-effects
 # ---------------------------------------------------------------------------
 
-def _make_run_cmd_json_se(playlist_json, ffprobe_json):
+def _make_run_cmd_json_se(playlist_json):
     """Dispatch run_cmd_json by inspecting cmd[0]."""
     def side_effect(cmd, timeout=120):
         if "yt-dlp" in cmd[0]:
             return playlist_json
-        if "ffprobe" in cmd[0]:
-            return ffprobe_json
         return {}
     return side_effect
 
 
-def _make_run_cmd_se(frame_writer, frames_per_call):
-    """Dispatch run_cmd: yt-dlp → no-op, ffmpeg → create images."""
-    def side_effect(cmd, timeout=120):
-        if "ffmpeg" in cmd[0] and "-frames:v" in cmd:
-            pattern = cmd[-1]
-            for i in range(1, frames_per_call + 1):
-                path = Path(pattern % i)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                frame_writer(path)
-        return subprocess.CompletedProcess(
-            args=cmd, returncode=0, stdout="", stderr="",
-        )
-    return side_effect
+def _noop_run_cmd(cmd, timeout=120):
+    """No-op run_cmd: downloads succeed without creating files."""
+    return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout="", stderr="",
+    )
 
 
-def _make_alternating_run_cmd_se(frames_per_call):
-    """Odd extractions → noise (accepted), even → static (rejected)."""
-    state = {"count": 0}
-
-    def side_effect(cmd, timeout=120):
-        if "ffmpeg" in cmd[0] and "-frames:v" in cmd:
-            state["count"] += 1
-            writer = noise_frame_writer if state["count"] % 2 == 1 else static_frame_writer
-            pattern = cmd[-1]
-            for i in range(1, frames_per_call + 1):
-                path = Path(pattern % i)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                writer(path)
-        return subprocess.CompletedProcess(
-            args=cmd, returncode=0, stdout="", stderr="",
-        )
-    return side_effect
+def _failing_run_cmd(cmd, timeout=120):
+    """run_cmd that fails yt-dlp downloads."""
+    if "yt-dlp" in str(cmd[0]) and "--download-sections" in cmd:
+        raise RuntimeError("download failed")
+    return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout="", stderr="",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -145,73 +138,99 @@ def _playlist(n=5):
     return build_ytdlp_playlist_json(entries)
 
 
+def _get_manifest(cfg):
+    """Find and parse the run manifest from the output directory."""
+    manifests = list(Path(cfg.out_dir).rglob("run_manifest.json"))
+    assert len(manifests) == 1, f"Expected 1 manifest, found {len(manifests)}"
+    return json.loads(manifests[0].read_text(encoding="utf-8"))
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 class TestEndToEnd:
 
-    def test_exact_frame_count(self):
-        """total_frames=30, frames_per_sample=10 → exactly 30 images."""
+    def test_exact_clip_count(self):
+        """total_frames=30, frames_per_sample=10 → exactly 3 clips."""
         with tempfile.TemporaryDirectory() as td:
             cfg = _cfg(td, total_frames=30, frames_per_sample=10)
             with mock_all_tools(
-                _make_run_cmd_se(noise_frame_writer, 10),
-                _make_run_cmd_json_se(_playlist(), build_ffprobe_json()),
+                _noop_run_cmd,
+                _make_run_cmd_json_se(_playlist()),
             ):
                 run_collection(cfg)
 
-            assert len(list(Path(cfg.out_dir).glob("*.jpg"))) == 30
+            manifest = _get_manifest(cfg)
+            assert manifest["totals"]["clips_collected"] == 3
 
-    def test_overshoot_prevention(self):
-        """total_frames=25 with frames_per_sample=10 → exactly 25."""
+    def test_clip_count_rounding(self):
+        """total_frames=25 with frames_per_sample=10 → 2 clips (25//10)."""
         with tempfile.TemporaryDirectory() as td:
             cfg = _cfg(td, total_frames=25, frames_per_sample=10)
             with mock_all_tools(
-                _make_run_cmd_se(noise_frame_writer, 10),
-                _make_run_cmd_json_se(_playlist(), build_ffprobe_json()),
+                _noop_run_cmd,
+                _make_run_cmd_json_se(_playlist()),
             ):
                 run_collection(cfg)
 
-            assert len(list(Path(cfg.out_dir).glob("*.jpg"))) == 25
+            manifest = _get_manifest(cfg)
+            assert manifest["totals"]["clips_collected"] == 2
 
-    def test_rejected_bursts_dont_count(self):
-        """Alternating noise/static: only noise bursts count toward total."""
+    def test_download_errors_dont_count(self):
+        """Download failures are recorded but don't count as collected clips."""
         with tempfile.TemporaryDirectory() as td:
             cfg = _cfg(td, total_frames=10, frames_per_sample=10)
+
+            call_count = {"n": 0}
+            def fail_then_succeed(cmd, timeout=120):
+                if "yt-dlp" in str(cmd[0]) and "--download-sections" in cmd:
+                    call_count["n"] += 1
+                    if call_count["n"] <= 2:
+                        raise RuntimeError("download failed")
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="", stderr="",
+                )
+
             with mock_all_tools(
-                _make_alternating_run_cmd_se(10),
-                _make_run_cmd_json_se(_playlist(), build_ffprobe_json()),
+                fail_then_succeed,
+                _make_run_cmd_json_se(_playlist()),
             ):
                 run_collection(cfg)
 
-            assert len(list(Path(cfg.out_dir).glob("*.jpg"))) == 10
+            manifest = _get_manifest(cfg)
+            assert manifest["totals"]["clips_collected"] == 1
+            assert manifest["totals"]["download_errors"] == 2
 
     def test_manifest_totals(self):
-        """Manifest has correct frames_written and burst counts."""
+        """Manifest has correct clips_collected and download_errors keys."""
         with tempfile.TemporaryDirectory() as td:
             cfg = _cfg(td, total_frames=10, frames_per_sample=10)
             with mock_all_tools(
-                _make_run_cmd_se(noise_frame_writer, 10),
-                _make_run_cmd_json_se(_playlist(), build_ffprobe_json()),
+                _noop_run_cmd,
+                _make_run_cmd_json_se(_playlist()),
             ):
                 run_collection(cfg)
 
-            manifest_path = Path(cfg.out_dir).parent / "run_manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest = _get_manifest(cfg)
+            assert manifest["totals"]["clips_collected"] == 1
+            assert manifest["totals"]["download_errors"] == 0
+            assert "run_id" in manifest
+            assert "samples" in manifest
+            assert len(manifest["samples"]) == 1
 
-            assert manifest["totals"]["frames_written"] == 10
-            assert manifest["totals"]["accepted_bursts"] >= 1
-            assert isinstance(manifest["totals"]["rejected_bursts"], int)
-
-    def test_tmp_cleaned_when_keep_tmp_false(self):
-        """Tmp directory removed when keep_tmp=False."""
+    def test_manifest_in_run_subdirectory(self):
+        """Manifest is written inside the run_id subdirectory, not the root."""
         with tempfile.TemporaryDirectory() as td:
-            cfg = _cfg(td, total_frames=10, frames_per_sample=10, keep_tmp=False)
+            cfg = _cfg(td, total_frames=10, frames_per_sample=10)
             with mock_all_tools(
-                _make_run_cmd_se(noise_frame_writer, 10),
-                _make_run_cmd_json_se(_playlist(), build_ffprobe_json()),
+                _noop_run_cmd,
+                _make_run_cmd_json_se(_playlist()),
             ):
                 run_collection(cfg)
 
-            assert not Path(cfg.tmp_dir).exists()
+            # Manifest should be in a subdirectory named after the run_id
+            out = Path(cfg.out_dir)
+            subdirs = [d for d in out.iterdir() if d.is_dir()]
+            assert len(subdirs) == 1
+            assert (subdirs[0] / "run_manifest.json").exists()
