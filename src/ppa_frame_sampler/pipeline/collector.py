@@ -8,6 +8,7 @@ from typing import Any
 
 from ppa_frame_sampler.config import Config
 from ppa_frame_sampler.media.downloader import download_segment
+from ppa_frame_sampler.output.cleanup import cleanup_tmp
 from ppa_frame_sampler.output.manifest import write_manifest
 from ppa_frame_sampler.output.naming import safe_slug
 from ppa_frame_sampler.output.zipper import zip_frames
@@ -154,6 +155,9 @@ def run_collection(cfg: Config) -> None:
 
     if cfg.make_zip:
         zip_frames(out_dir, out_dir / "cvat_upload.zip")
+
+    if not cfg.keep_tmp:
+        cleanup_tmp(tmp_dir)
 
     log.info(
         "Done — %d clips collected, %d download errors",

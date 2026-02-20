@@ -17,7 +17,7 @@ def resolve_channel_url(channel_query: str) -> str:
     the uploader/channel URL from the result metadata.  Falls back to the known
     PPA Tour handle if the search fails.
 
-    Results are cached for 24 hours to avoid repeated lookups.
+    Results are cached persistently (no TTL) to avoid repeated lookups.
     """
     cached = get_cached_channel_url(channel_query)
     if cached:

@@ -12,7 +12,7 @@ def test_manifest_round_trip():
         "params": {"seed": 42},
         "candidates": {"count": 5},
         "samples": [],
-        "totals": {"accepted_bursts": 0, "rejected_bursts": 0, "frames_written": 0},
+        "totals": {"clips_collected": 0, "download_errors": 0},
     }
 
     with tempfile.TemporaryDirectory() as td:
@@ -37,6 +37,6 @@ def test_manifest_required_keys():
         "params": {},
         "candidates": {"count": 0},
         "samples": [],
-        "totals": {"accepted_bursts": 0, "rejected_bursts": 0, "frames_written": 0},
+        "totals": {"clips_collected": 0, "download_errors": 0},
     }
     assert required.issubset(manifest.keys())

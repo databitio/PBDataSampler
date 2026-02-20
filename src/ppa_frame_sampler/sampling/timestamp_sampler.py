@@ -26,7 +26,7 @@ def sample_timestamp(
       reduced probability near both ends.
     """
     if rng is None:
-        rng = random.Random()  # uses global state seeded externally
+        rng = random._inst  # module-level instance, respects random.seed()
 
     # Legal bounds
     lo = intro_margin_s
