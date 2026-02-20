@@ -54,7 +54,8 @@ ppa-frame-sampler --out my_dataset/frames --tmp my_dataset/tmp
 |---|---|---|---|
 | **Channel** | `--channel-query` | `"PPA Tour"` | Search query to find the channel |
 | | `--channel-url` | *(auto)* | Direct channel URL override |
-| **Eligibility** | `--max-age-days` | `365` | Max video age in days |
+| **Eligibility** | `--min-age-days` | `0` | Min video age in days (exclude recent uploads) |
+| | `--max-age-days` | `365` | Max video age in days |
 | | `--max-videos` | `200` | Max candidate videos to consider |
 | | `--min-video-duration-s` | `120` | Minimum video duration (seconds) |
 | | `--match-type` | `both` | Filter: `singles`, `doubles`, or `both` |
@@ -69,7 +70,7 @@ ppa-frame-sampler --out my_dataset/frames --tmp my_dataset/tmp
 | | `--format` | `jpg` | Image format (`jpg` or `png`) |
 | | `--zip` | *(off)* | Create a zip archive of the output |
 | | `--keep-tmp` | *(off)* | Keep temporary files after completion |
-| **Filtering** | `--min-motion-score` | `0.015` | Min inter-frame motion (0–1) |
+| **Filtering** *(not active in clips-only mode)* | `--min-motion-score` | `0.015` | Min inter-frame motion (0–1) |
 | | `--max-static-score` | `0.92` | Max static frame ratio (0–1) |
 | | `--min-edge-density` | `0.01` | Min Canny edge density (0–1) |
 | | `--max-overlay-coverage` | `0.70` | Max static overlay coverage (0–1) |
@@ -95,9 +96,11 @@ The `run_manifest.json` documents all parameters, candidate counts, and per-samp
 
 Videos are classified as **singles**, **doubles**, or **unknown** based on title heuristics:
 
-- Titles containing `" vs "` with `/` in player names are classified as **doubles** (e.g., `"Johns/Tardio vs Shimabukuro/Funemizu"`)
-- Titles with `" vs "` but no `/` are **singles** (e.g., `"Hunter Johnson vs Christian Alshon"`)
-- Titles without `" vs "` are **unknown** and are always included (highlights, compilations, etc.)
+- Titles containing a matchup separator with `/` in player names are classified as **doubles** (e.g., `"Johns/Tardio vs Shimabukuro/Funemizu"`)
+- Titles with a separator but no `/` are **singles** (e.g., `"Hunter Johnson vs Christian Alshon"`)
+- Titles without a recognised separator are **unknown** and are always included (highlights, compilations, etc.)
+
+Recognised separators (case-insensitive): `vs`, `vs.`, `v`, `takes on`, `against`, `faces`
 
 ```bash
 ppa-frame-sampler --match-type singles   # Singles matches only
@@ -107,7 +110,7 @@ ppa-frame-sampler --match-type both      # All videos (default)
 
 ## Caching
 
-YouTube lookups (channel resolution and video catalog) are cached for 24 hours in `output/.cache/youtube_cache.json` to avoid redundant yt-dlp calls across runs.
+YouTube lookups (channel resolution and video catalog) are cached indefinitely in `output/.cache/youtube_cache.json` to avoid redundant yt-dlp calls across runs. Each cache entry includes a `cached_date` for reference. Delete individual entries or the entire file to force a refresh.
 
 ## Testing
 
@@ -117,7 +120,7 @@ pytest
 
 ## Specification
 
-The full project specification is in [PLAN.txt](PLAN.txt), covering all requirements (§1–§16) including burst quality filtering and frame extraction which are implemented but not yet wired into the main pipeline.
+The full project specification is in [PLAN.txt](PLAN.txt), covering all requirements (§1–§16) including burst quality filtering and frame extraction which are implemented but not yet wired into the main clips-only pipeline. Note that some filter threshold defaults in the code differ from the spec (tuned for real-world PPA content).
 
 ## License
 

@@ -253,7 +253,7 @@ def list_recent_videos(
     Eligibility: ``upload_date`` between *min_age_days* and *max_age_days* old,
     and ``duration >= min_duration_s``.
 
-    Results are cached for 24 hours to avoid repeated yt-dlp lookups.
+    Results are cached persistently to avoid repeated yt-dlp lookups.
 
     Uses flat-playlist fetch + binary search for efficient access to any
     date range.
