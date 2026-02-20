@@ -5,7 +5,7 @@ import random
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ppa_frame_sampler.config import Config
 from ppa_frame_sampler.filter.court_scorer import CourtScore, pick_best_frame
@@ -69,7 +69,7 @@ def run_court_collection(cfg: Config) -> None:
             )
 
     # ── Prepare manifest ────────────────────────────────────────────
-    manifest: Dict[str, Any] = {
+    manifest: dict[str, Any] = {
         "mode": "court-frames",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "params": {
@@ -104,8 +104,8 @@ def run_court_collection(cfg: Config) -> None:
             vid_idx + 1, len(candidates), video.video_id, video.title,
         )
 
-        best_path: Optional[Path] = None
-        best_score: Optional[CourtScore] = None
+        best_path: Path | None = None
+        best_score: CourtScore | None = None
         best_ts: float = 0.0
 
         for attempt in range(court.court_sample_attempts):
@@ -203,7 +203,7 @@ def run_court_collection(cfg: Config) -> None:
 
 
 def _cleanup_attempt(
-    clip_path: Path, frames_dir: Path, keep: Optional[Path] = None,
+    clip_path: Path, frames_dir: Path, keep: Path | None = None,
 ) -> None:
     """Remove temporary clip and extracted frames, optionally preserving *keep*."""
     if clip_path.exists():
@@ -216,15 +216,15 @@ def _cleanup_attempt(
 
 
 def _record_result(
-    manifest: Dict[str, Any],
+    manifest: dict[str, Any],
     video: Any,
     timestamp_s: float,
     status: str,
-    filename: Optional[str] = None,
-    composite_score: Optional[float] = None,
+    filename: str | None = None,
+    composite_score: float | None = None,
 ) -> None:
     """Append a result record to the manifest."""
-    rec: Dict[str, Any] = {
+    rec: dict[str, Any] = {
         "video_id": video.video_id,
         "video_url": video.webpage_url,
         "title": video.title,

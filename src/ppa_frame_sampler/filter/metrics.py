@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import cv2
 import numpy as np
 
 
-def load_and_resize(paths: List[Path], width: int) -> List[np.ndarray]:
+def load_and_resize(paths: list[Path], width: int) -> list[np.ndarray]:
     """Load images from *paths* and resize to *width* (preserving aspect ratio)."""
-    imgs: List[np.ndarray] = []
+    imgs: list[np.ndarray] = []
     for p in paths:
         img = cv2.imread(str(p), cv2.IMREAD_COLOR)
         if img is None:
@@ -22,12 +21,12 @@ def load_and_resize(paths: List[Path], width: int) -> List[np.ndarray]:
     return imgs
 
 
-def compute_motion_score(imgs: List[np.ndarray]) -> float:
+def compute_motion_score(imgs: list[np.ndarray]) -> float:
     """Mean absolute difference between consecutive grayscale frames, normalised to [0, 1]."""
     if len(imgs) < 2:
         return 0.0
 
-    diffs: List[float] = []
+    diffs: list[float] = []
     prev_gray = cv2.cvtColor(imgs[0], cv2.COLOR_BGR2GRAY).astype(np.float32)
     for img in imgs[1:]:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
@@ -38,7 +37,7 @@ def compute_motion_score(imgs: List[np.ndarray]) -> float:
     return float(np.mean(diffs))
 
 
-def compute_static_score(imgs: List[np.ndarray], diff_thresh: float = 2.0) -> float:
+def compute_static_score(imgs: list[np.ndarray], diff_thresh: float = 2.0) -> float:
     """Fraction of consecutive frame pairs whose mean abs diff is below *diff_thresh*."""
     if len(imgs) < 2:
         return 1.0
@@ -64,7 +63,7 @@ def compute_edge_density(img: np.ndarray) -> float:
     return float(np.count_nonzero(edges)) / float(edges.size)
 
 
-def compute_overlay_coverage(imgs: List[np.ndarray], var_thresh: float = 2.0) -> float:
+def compute_overlay_coverage(imgs: list[np.ndarray], var_thresh: float = 2.0) -> float:
     """Fraction of pixels with near-zero variance across frames (static overlays)."""
     if len(imgs) < 2:
         return 0.0
@@ -76,7 +75,7 @@ def compute_overlay_coverage(imgs: List[np.ndarray], var_thresh: float = 2.0) ->
     return static_fraction
 
 
-def compute_scene_cut_rate(imgs: List[np.ndarray], cut_thresh: float = 0.35) -> float:
+def compute_scene_cut_rate(imgs: list[np.ndarray], cut_thresh: float = 0.35) -> float:
     """Fraction of consecutive frame transitions that look like scene cuts.
 
     Uses normalised histogram correlation; a low correlation indicates a cut.

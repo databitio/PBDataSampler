@@ -5,7 +5,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ppa_frame_sampler.youtube.models import VideoMeta
 
@@ -14,7 +14,7 @@ log = logging.getLogger("ppa_frame_sampler")
 _CACHE_DIR = Path("output/.cache")
 _CACHE_FILE = _CACHE_DIR / "youtube_cache.json"
 
-def _load_cache() -> Dict[str, Any]:
+def _load_cache() -> dict[str, Any]:
     if not _CACHE_FILE.exists():
         return {}
     try:
@@ -24,12 +24,12 @@ def _load_cache() -> Dict[str, Any]:
         return {}
 
 
-def _save_cache(data: Dict[str, Any]) -> None:
+def _save_cache(data: dict[str, Any]) -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _CACHE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def get_cached_channel_url(query: str) -> Optional[str]:
+def get_cached_channel_url(query: str) -> str | None:
     cache = _load_cache()
     entry = cache.get("channel_urls", {}).get(query)
     if entry:
@@ -48,7 +48,7 @@ def set_cached_channel_url(query: str, url: str) -> None:
     _save_cache(cache)
 
 
-def get_cached_videos(channel_url: str, max_age_days: int, min_duration_s: int, min_age_days: int = 0, max_videos: int = 200) -> Optional[List[VideoMeta]]:
+def get_cached_videos(channel_url: str, max_age_days: int, min_duration_s: int, min_age_days: int = 0, max_videos: int = 200) -> list[VideoMeta] | None:
     cache = _load_cache()
     key = f"{channel_url}|age={max_age_days}|minage={min_age_days}|dur={min_duration_s}|maxv={max_videos}"
     entry = cache.get("video_catalogs", {}).get(key)
@@ -71,7 +71,7 @@ def set_cached_videos(
     channel_url: str,
     max_age_days: int,
     min_duration_s: int,
-    videos: List[VideoMeta],
+    videos: list[VideoMeta],
     min_age_days: int = 0,
     max_videos: int = 200,
 ) -> None:

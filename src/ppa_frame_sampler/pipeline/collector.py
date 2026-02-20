@@ -4,7 +4,7 @@ import logging
 import random
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from ppa_frame_sampler.config import Config
 from ppa_frame_sampler.media.downloader import download_segment
@@ -73,7 +73,7 @@ def run_collection(cfg: Config) -> None:
     out_dir = out_root / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("Run output directory: %s", out_dir)
-    manifest: Dict[str, Any] = {
+    manifest: dict[str, Any] = {
         "run_id": run_id,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "params": {
@@ -163,7 +163,7 @@ def run_collection(cfg: Config) -> None:
 
 
 def _record_sample(
-    manifest: Dict[str, Any],
+    manifest: dict[str, Any],
     video: Any,
     start_s: float,
     end_s: float,
@@ -171,7 +171,7 @@ def _record_sample(
     clip_name: str,
 ) -> None:
     """Append a sample record to the manifest."""
-    rec: Dict[str, Any] = {
+    rec: dict[str, Any] = {
         "video_id": video.video_id,
         "video_url": video.webpage_url,
         "title": video.title,

@@ -4,24 +4,25 @@ version = "0.1.0"
 description = "Sample consecutive frames from recent PPA Tour YouTube videos for CVAT labeling."
 requires-python = ">=3.10"
 dependencies = [
-  "yt-dlp>=2024.0.0",
-  "opencv-python>=4.8.0",
+  "yt-dlp>=2025.0.0",
+  "opencv-python>=4.10.0",
+  "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=7.0",
+  "pytest>=9.0",
 ]
 
 [project.scripts]
 ppa-frame-sampler = "ppa_frame_sampler.cli:main"
 
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=70.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.pytest.ini_options]
+[tool.pytest]
 testpaths = ["tests"]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List
 
 from ppa_frame_sampler.media.tools import ensure_tool, run_cmd_json
 from ppa_frame_sampler.youtube.cache import get_cached_videos, set_cached_videos
@@ -247,7 +246,7 @@ def list_recent_videos(
     max_videos: int,
     min_duration_s: int,
     min_age_days: int = 0,
-) -> List[VideoMeta]:
+) -> list[VideoMeta]:
     """Return up to *max_videos* eligible videos from *channel_url*/videos.
 
     Eligibility: ``upload_date`` between *min_age_days* and *max_age_days* old,

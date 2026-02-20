@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal
 
 BiasMode = Literal["hard_margin", "soft_bias"]
 ImageFormat = Literal["jpg", "png"]
@@ -40,7 +40,7 @@ class Config:
 
     # YouTube / catalog
     channel_query: str = "PPA Tour"
-    channel_url: Optional[str] = None
+    channel_url: str | None = None
     min_age_days: int = 0
     max_age_days: int = 365
     max_videos: int = 200
@@ -50,7 +50,7 @@ class Config:
     # Sampling
     frames_per_sample: int = 20
     total_frames: int = 500
-    seed: Optional[int] = None
+    seed: int | None = None
     bias_mode: BiasMode = "soft_bias"
     intro_margin_s: float = 15.0
     outro_margin_s: float = 15.0

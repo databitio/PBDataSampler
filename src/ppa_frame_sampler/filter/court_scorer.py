@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -119,11 +118,11 @@ def score_frame(bgr: np.ndarray, resize_width: int = 640) -> CourtScore:
 
 
 def pick_best_frame(
-    paths: List[Path], resize_width: int = 640,
-) -> Optional[Tuple[Path, CourtScore]]:
+    paths: list[Path], resize_width: int = 640,
+) -> tuple[Path, CourtScore] | None:
     """Score all frames, return (path, score) of the best one, or None if no frames."""
-    best_path: Optional[Path] = None
-    best_score: Optional[CourtScore] = None
+    best_path: Path | None = None
+    best_score: CourtScore | None = None
 
     for p in paths:
         img = cv2.imread(str(p), cv2.IMREAD_COLOR)

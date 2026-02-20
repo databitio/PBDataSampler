@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List
 
 from ppa_frame_sampler.media.tools import ensure_tool, run_cmd
 
@@ -15,7 +14,7 @@ def extract_frames(
     out_dir: Path,
     prefix: str,
     image_format: str,
-) -> List[Path]:
+) -> list[Path]:
     """Extract *frames* consecutive decoded frames from *clip_path*.
 
     Writes files to *out_dir* named ``{prefix}_{seq:06d}.{ext}``.
@@ -32,7 +31,7 @@ def extract_frames(
         "-hide_banner",
         "-loglevel", "error",
         "-i", str(clip_path),
-        "-vsync", "0",
+        "-fps_mode", "passthrough",
         "-frames:v", str(frames),
     ]
 
@@ -45,7 +44,7 @@ def extract_frames(
     run_cmd(cmd, timeout=60)
 
     # Collect written files in deterministic order
-    written: List[Path] = sorted(
+    written: list[Path] = sorted(
         out_dir.glob(f"{prefix}_*.{ext}"),
         key=lambda p: p.name,
     )

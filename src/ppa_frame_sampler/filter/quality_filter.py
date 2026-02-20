@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List
 
 from ppa_frame_sampler.config import FilterThresholds
 from ppa_frame_sampler.filter import metrics as M
@@ -12,7 +11,7 @@ log = logging.getLogger("ppa_frame_sampler")
 
 
 def evaluate_burst(
-    frame_paths: List[Path],
+    frame_paths: list[Path],
     thresholds: FilterThresholds,
     analysis_resize_width: int,
     analysis_frame_count: int,
@@ -54,7 +53,7 @@ def evaluate_burst(
     )
 
     # Decision logic (conservative: all conditions must pass)
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if motion < thresholds.min_motion_score:
         reasons.append(f"low_motion({motion:.3f}<{thresholds.min_motion_score})")
@@ -85,7 +84,7 @@ def evaluate_burst(
     return FilterDecision(accepted=accepted, reason=reason, metrics=metrics)
 
 
-def _evenly_spaced(items: List[Path], count: int) -> List[Path]:
+def _evenly_spaced(items: list[Path], count: int) -> list[Path]:
     """Pick *count* evenly-spaced items from *items*."""
     n = len(items)
     if n <= count:
